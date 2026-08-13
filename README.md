@@ -45,7 +45,7 @@ npm run dev
 3. `.env.example` を `.env.local` にコピーし、`VITE_SUPABASE_URL`と`VITE_SUPABASE_ANON_KEY`を設定します。Service Role Keyはブラウザへ設定しないでください。
 4. StorageのSQL Editorで、認証ユーザーが自分のフォルダーだけ操作できるPolicyを作成します。
 
-ヘッダーの「クラウド設定」は環境変数が未設定でも開けます。未設定時は必要な変数と設定手順を表示し、設定済みの場合はログインフォームを表示します。Viteの環境変数はビルド／起動時に読み込まれるため、設定後はアプリを再起動してください。
+ヘッダーの「クラウド設定」は常に開けます。画面からSupabase URLとAnon Keyを入力して保存でき、設定後すぐにログインできます。入力した接続情報はこのブラウザのlocalStorageに保存されます。`.env.local`による事前設定も引き続き利用できます。Anon Keyは公開クライアント用ですが、Service Role Keyは絶対に入力しないでください。
 
 ```sql
 create policy "users read own machine backups"

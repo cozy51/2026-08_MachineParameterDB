@@ -3,8 +3,13 @@ import type { BackupEnvelope } from './types';
 export const BACKUP_BUCKET='machine-parameter-backups';
 export type SyncState='local'|'checking'|'synced'|'uploading'|'local-newer'|'cloud-newer'|'conflict'|'error'|'disabled';
 export type CloudBackup={envelope:BackupEnvelope;serverUpdatedAt?:string};
-const url=import.meta.env.VITE_SUPABASE_URL;const key=import.meta.env.VITE_SUPABASE_ANON_KEY;
-export const supabase=url&&key?createClient(url,key):null;
+const SETTINGS_KEY='machine-parameter-supabase-settings';
+type CloudSettings={url:string;anonKey:string};
+export function loadCloudSettings():CloudSettings|null{try{const saved=localStorage.getItem(SETTINGS_KEY);if(saved){const parsed=JSON.parse(saved) as CloudSettings;if(parsed.url&&parsed.anonKey)return parsed}}catch{return null}const url=import.meta.env.VITE_SUPABASE_URL;const anonKey=import.meta.env.VITE_SUPABASE_ANON_KEY;return url&&anonKey?{url,anonKey}:null}
+const initialSettings=loadCloudSettings();
+export let supabase=initialSettings?createClient(initialSettings.url,initialSettings.anonKey):null;
+export function saveCloudSettings(settings:CloudSettings){const normalized={url:settings.url.trim().replace(/\/$/,''),anonKey:settings.anonKey.trim()};if(!/^https:\/\/.+\.supabase\.co$/i.test(normalized.url))throw new Error('Supabase URLの形式を確認してください。');if(normalized.anonKey.length<20)throw new Error('Anon Keyを確認してください。');localStorage.setItem(SETTINGS_KEY,JSON.stringify(normalized));supabase=createClient(normalized.url,normalized.anonKey)}
+export function clearCloudSettings(){localStorage.removeItem(SETTINGS_KEY);supabase=null}
 export const backupPath=(userId:string)=>`${userId}/MachineParameterDB-latest.json`;
 export const currentUser=async():Promise<User|null>=>supabase?(await supabase.auth.getUser()).data.user:null;
 export async function signIn(email:string,password:string){if(!supabase)throw new Error('Supabase環境変数が設定されていません。');const{error}=await supabase.auth.signInWithPassword({email,password});if(error)throw error}
