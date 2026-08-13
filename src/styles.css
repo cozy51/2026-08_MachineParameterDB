@@ -88,3 +88,40 @@ td.detail textarea {
 }
 .cell-changed textarea { border-color: #e4ac56; }
 .multiline-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.row-actions { width: 5.5rem; white-space: nowrap; }
+.row-actions button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 4px; }
+.delete-row { border: 0; background: transparent; color: #b42318; }
+.delete-row:hover { background: #fee4e2; }
+.delete-row svg, .confirm-delete svg { width: 1rem; }
+.confirm-back { z-index: 20; }
+.confirm-dialog { width: min(30rem, calc(100vw - 2rem)); padding: 1.75rem; border-radius: 12px; background: white; box-shadow: 0 18px 50px #0a152d55; }
+.confirm-icon { display: grid; place-items: center; width: 2.75rem; height: 2.75rem; border-radius: 50%; background: #fee4e2; color: #b42318; }
+.confirm-dialog h2 { margin: 0.875rem 0 0.5rem; font-size: 1.25rem; }
+.confirm-dialog p { margin: 0; color: #465365; font-size: 0.9375rem; }
+.delete-warning { margin-top: 1rem; padding: 0.75rem; border-radius: 6px; background: #fff4e5; color: #8a4b08; font-size: 0.8125rem; line-height: 1.6; }
+.confirm-actions { display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem; }
+.confirm-actions button { display: flex; align-items: center; gap: 0.375rem; padding: 0.625rem 1rem; border: 1px solid #cfd8e2; border-radius: 6px; background: white; font-weight: 600; }
+.confirm-actions .confirm-delete { border-color: #b42318; background: #b42318; color: white; }
+
+/* Keep the current editing state visible even after scrolling deep into the table. */
+.app { min-height: 100vh; transition: background-color 160ms ease; }
+.app.is-editing { background: #fff8e8; }
+.is-editing main { background: linear-gradient(#fff8e8, #fffdf8 28rem); }
+.is-editing .editbar {
+  position: sticky;
+  top: 0.5rem;
+  z-index: 8;
+  box-shadow: 0 5px 18px #82520e2b;
+}
+.is-editing .table-card { border-color: #e4ad53; box-shadow: 0 0 0 2px #f6d89e, 0 2px 8px #22314b0a; }
+.is-editing .table-head { background: #fffbf2; }
+.is-editing tbody tr { background: #fffdf8; }
+.is-editing tbody tr:nth-child(even) { background: #fffaf0; }
+.is-editing td input,
+.is-editing td textarea { background: #fff9e8; border-color: #dba64d; }
+.is-editing td input:focus,
+.is-editing td textarea:focus { outline: 3px solid #f6c96866; border-color: #b96d0b; background: white; }
+.is-editing .row-actions { background: #fff4dc; }
+
+@media (prefers-reduced-motion: reduce) { .app { transition: none; } }
