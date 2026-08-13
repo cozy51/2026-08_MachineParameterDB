@@ -9,8 +9,8 @@ import { applyImport, recordsToParameters } from './importer';
 import type { BackupEnvelope, Override, Parameter, ResolvedParameter, Series } from './types';
 
 const columns: { key: keyof Parameter; label: string }[] = [
-  {key:'number',label:'パラメータNo.'},{key:'standardValue',label:'標準的な値'},{key:'unit',label:'単位'},
-  {key:'name',label:'パラメータ名称'},{key:'detail',label:'設定値詳細'},{key:'unitCategory',label:'単位分類'},{key:'note',label:'備考'},
+  {key:'number',label:'パラメータNo.'},{key:'standardValue',label:'標準的な値'},{key:'unit',label:'単位'},{key:'unitCategory',label:'単位分類'},
+  {key:'name',label:'パラメータ名称'},{key:'detail',label:'設定値詳細'},{key:'note',label:'備考'},
 ];
 
 export function App() {

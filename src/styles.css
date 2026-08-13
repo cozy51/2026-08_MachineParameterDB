@@ -217,3 +217,12 @@ thead th {
 .edit-scope-model td.cell-changed textarea:not(:disabled){cursor:text;caret-color:#54267c}.edit-scope-model td.cell-changed input:focus,
 .edit-scope-model td.cell-changed textarea:focus{background:#fff;border-color:#7542a8;outline:3px solid #a87dca66}
 .local-actions{display:flex!important;gap:.4rem!important}.context>.local-actions button{margin-left:0}.local-actions button:disabled{opacity:.45;cursor:not-allowed}
+
+/* Column order: No., value, unit, unit category, name, details, notes. */
+th:nth-child(1),td:nth-child(1){width:122px}
+th:nth-child(2),td:nth-child(2){width:115px}
+th:nth-child(3),td:nth-child(3){width:70px}
+th:nth-child(4),td:nth-child(4){width:110px}
+th:nth-child(5),td:nth-child(5){width:190px}
+th:nth-child(6),td:nth-child(6){width:32%}
+th:nth-child(7),td:nth-child(7){width:150px}
