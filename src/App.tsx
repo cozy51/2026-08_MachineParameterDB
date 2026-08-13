@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Trash2, Upload, UploadCloud, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Sheet, Trash2, Upload, UploadCloud, X } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { seedData } from './data';
@@ -15,9 +15,9 @@ const columns: { key: keyof Parameter; label: string }[] = [
 
 export function App() {
   const [data,setData]=useState<Series[]>(seedData); const [seriesId,setSeriesId]=useState('src350');
-  const [modelId,setModelId]=useState('src350-m3'); const [parameterNumber,setParameterNumber]=useState(''); const [query,setQuery]=useState(''); const [edit,setEdit]=useState(false);
+  const [modelId,setModelId]=useState('src350-m3'); const [cargoTypeId,setCargoTypeId]=useState('foup'); const [parameterNumber,setParameterNumber]=useState(''); const [unitCategoryFilter,setUnitCategoryFilter]=useState(''); const [query,setQuery]=useState(''); const [edit,setEdit]=useState(false);
   const [onlyDiff,setOnlyDiff]=useState(false); const [draft,setDraft]=useState<Series[]|null>(null);
-  const [editScope,setEditScope]=useState<'model'|'series'>('model'); const [importOpen,setImportOpen]=useState(false);
+  const [editScope,setEditScope]=useState<'cargo'|'model'|'series'>('model'); const [importOpen,setImportOpen]=useState(false);
   const [toast,setToast]=useState(''); const fileRef=useRef<HTMLInputElement>(null);
   const localImportRef=useRef<HTMLInputElement>(null);
   const [importScope,setImportScope]=useState<'series'|'model'>('series');
@@ -38,22 +38,26 @@ export function App() {
   useEffect(()=>{if(!supabase)return;currentUser().then(user=>{if(user)setUserId(user.id)});return supabase.auth.onAuthStateChange((_event,session)=>setUserId(session?.user.id??'')).data.subscription.unsubscribe},[]);
   const source=edit&&draft?draft:data; const series=source.find(s=>s.id===seriesId)??source[0];
   const model=series.models.find(m=>m.id===modelId)??series.models[0];
+  const cargoType=model.cargoTypes.find(item=>item.id===cargoTypeId)??model.cargoTypes[0];
+  const hasCargoOverrides=Object.values(cargoType.overrides).some(override=>Object.keys(override).length>0);
   const hasModelOverrides=Object.values(model.overrides).some(override=>Object.keys(override).length>0);
   useEffect(()=>{if(!series.models.some(m=>m.id===modelId))setModelId(series.models[0].id)},[series,modelId]);
+  useEffect(()=>{if(!model.cargoTypes.some(item=>item.id===cargoTypeId))setCargoTypeId(model.cargoTypes[0].id)},[model,cargoTypeId]);
   const rows=useMemo(()=>series.parameters.map(p=>{
-    const override=model.overrides[p.id]??{}; const changedFields=Object.keys(override).filter(k=>override[k as keyof Override]!==p[k as keyof Parameter]);
-    return {...p,...override,override,changedFields} as ResolvedParameter;
-  }).filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!parameterNumber||p.number===parameterNumber)&&(!query||[p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[series,model,parameterNumber,query,onlyDiff]);
+    const modelOverride=model.overrides[p.id]??{};const cargoOverride=cargoType.overrides[p.id]??{};const override={...modelOverride,...cargoOverride}; const changedFields=Object.keys(override).filter(k=>override[k as keyof Override]!==p[k as keyof Parameter]);
+    return {...p,...override,override,changedFields,cargoChangedFields:Object.keys(cargoOverride)} as ResolvedParameter;
+  }).filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!parameterNumber||p.number===parameterNumber)&&(!unitCategoryFilter||p.unitCategory===unitCategoryFilter)&&(!query||[p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[series,model,cargoType,parameterNumber,unitCategoryFilter,query,onlyDiff]);
   const parameterNumbers=useMemo(()=>[...new Set(series.parameters.map(parameter=>parameter.number))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),[series.parameters]);
   useEffect(()=>{if(parameterNumber&&!parameterNumbers.includes(parameterNumber))setParameterNumber('')},[parameterNumber,parameterNumbers]);
   const unitCategoryOptions=useMemo(()=>{
     const values=new Set<string>();
     source.forEach(item=>{
       item.parameters.forEach(parameter=>{if(parameter.unitCategory.trim())values.add(parameter.unitCategory.trim())});
-      item.models.forEach(variant=>Object.values(variant.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())}));
+      item.models.forEach(variant=>{Object.values(variant.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())});variant.cargoTypes.forEach(cargo=>Object.values(cargo.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())}))});
     });
     return [...values].sort((a,b)=>a.localeCompare(b,'ja'));
   },[source]);
+  useEffect(()=>{if(unitCategoryFilter&&!unitCategoryOptions.includes(unitCategoryFilter))setUnitCategoryFilter('')},[unitCategoryFilter,unitCategoryOptions]);
 
   const beginEdit=()=>{setDraft(structuredClone(data));setEdit(true)};
   const cancel=()=>{setDraft(null);setEdit(false);setToast('変更を破棄しました')};
@@ -61,15 +65,16 @@ export function App() {
   const update=(row:ResolvedParameter,key:keyof Parameter,value:string)=>setDraft(current=>{
     if(!current)return current; const next=structuredClone(current); const s=next.find(x=>x.id===seriesId)!;
     if(editScope==='series'){const p=s.parameters.find(x=>x.id===row.id)!;(p as unknown as Record<string,string>)[key]=value}
-    else {const m=s.models.find(x=>x.id===modelId)!;m.overrides[row.id]??={};(m.overrides[row.id] as Record<string,string>)[key]=value}
+    else if(editScope==='model'){const m=s.models.find(x=>x.id===modelId)!;m.overrides[row.id]??={};(m.overrides[row.id] as Record<string,string>)[key]=value}
+    else {const cargo=s.models.find(x=>x.id===modelId)!.cargoTypes.find(x=>x.id===cargoTypeId)!;cargo.overrides[row.id]??={};(cargo.overrides[row.id] as Record<string,string>)[key]=value}
     return next;
   });
   const handleFieldInput=(row:ResolvedParameter,key:keyof Parameter)=>(event:FormEvent<HTMLInputElement|HTMLTextAreaElement>)=>update(row,key,event.currentTarget.value);
-  const resetOverride=(id:string)=>setDraft(current=>{if(!current)return current;const next=structuredClone(current);const m=next.find(s=>s.id===seriesId)!.models.find(x=>x.id===modelId)!;delete m.overrides[id];return next});
+  const resetOverride=(id:string)=>setDraft(current=>{if(!current)return current;const next=structuredClone(current);const m=next.find(s=>s.id===seriesId)!.models.find(x=>x.id===modelId)!;if(editScope==='cargo')delete m.cargoTypes.find(x=>x.id===cargoTypeId)!.overrides[id];else delete m.overrides[id];return next});
   const deleteRow=()=>{
     if(!deleteTarget)return;
     const deleted=deleteTarget;
-    setDraft(current=>{if(!current)return current;const next=structuredClone(current);const target=next.find(s=>s.id===seriesId)!;target.parameters=target.parameters.filter(parameter=>parameter.id!==deleted.id);target.models.forEach(variant=>delete variant.overrides[deleted.id]);return next});
+    setDraft(current=>{if(!current)return current;const next=structuredClone(current);const target=next.find(s=>s.id===seriesId)!;target.parameters=target.parameters.filter(parameter=>parameter.id!==deleted.id);target.models.forEach(variant=>{delete variant.overrides[deleted.id];variant.cargoTypes.forEach(cargo=>delete cargo.overrides[deleted.id])});return next});
     setDeleteTarget(null);setToast(`パラメータNo. ${deleted.number} を削除しました（保存前）`);
   };
 
@@ -91,6 +96,11 @@ export function App() {
     if(!envelope)return;
     const blob=new Blob([JSON.stringify(envelope,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');
     link.href=url;link.download=`MachineParameterDB-${new Date().toISOString().slice(0,10)}-v${envelope.dataVersion}.json`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);setToast('ローカルバックアップを書き出しました');
+  }
+  function exportParameterExcel(){
+    const records=rows.map(row=>({'パラメータNo':row.number,'標準的な値':row.standardValue,'単位':row.unit,'単位分類':row.unitCategory,'パラメータ名称':row.name,'設定値詳細':row.detail,'備考':row.note,...(row.extra??{})}));
+    const sheet=XLSX.utils.json_to_sheet(records);sheet['!cols']=[{wch:16},{wch:14},{wch:10},{wch:14},{wch:28},{wch:72},{wch:28}];const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'パラメータ一覧');
+    XLSX.writeFile(book,`${series.name}-${model.name}-${cargoType.name}-parameters.xlsx`);setToast(`${rows.length}件をExcel出力しました`);
   }
   async function importLocalBackup(file:File){
     setCloudError('');
@@ -114,28 +124,30 @@ export function App() {
   const syncLabels:Record<SyncState,string>={disabled:'ローカル保存済み',local:'ローカル保存済み',checking:'クラウド確認中',synced:'クラウドと同期済み',uploading:'クラウド保存中','local-newer':'ローカルに新しい変更あり','cloud-newer':'クラウドに新しいデータあり',conflict:'同期競合',error:'クラウド保存失敗'};
   const syncLabel=syncLabels[syncState];
 
-  return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''}`}>
+  return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''} ${hasCargoOverrides?'has-cargo-overrides':''}`}>
     <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><div className={`sync-status sync-${syncState}`} title={cloudError||`データ世代: ${envelope?.dataVersion??0}`}><span/>{syncLabel}{lastSync&&<small>{new Date(lastSync).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small>}</div>{userId?<button className="cloud-auth" onClick={()=>signOut()}>ログアウト</button>:<button className="cloud-auth" onClick={()=>setAuthOpen(true)}><CloudCog/>クラウド設定</button>}<button className="help"><CircleHelp size={19}/></button></div></header>
     <main>
       <section className="control-card">
         <div className="selectors has-parameter-filter">
           <label>シリーズ<div className="select-wrap"><Layers3 size={17}/><select value={seriesId} onChange={e=>setSeriesId(e.target.value)}>{source.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><ChevronDown/></div></label>
           <label>型式<div className={`select-wrap model ${hasModelOverrides?'has-model-overrides':''}`}><select value={modelId} onChange={e=>setModelId(e.target.value)}>{series.models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown/></div></label>
+          <label>搬送物<div className={`select-wrap cargo ${hasCargoOverrides?'has-cargo-overrides':''}`}><select value={cargoTypeId} onChange={e=>setCargoTypeId(e.target.value)}>{model.cargoTypes.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown/></div></label>
           <label>パラメータNo.<div className="select-wrap parameter-number"><select value={parameterNumber} onChange={e=>setParameterNumber(e.target.value)}><option value="">すべて</option>{parameterNumbers.map(number=><option key={number} value={number}>{number}</option>)}</select><ChevronDown/></div></label>
+          <label>単位分類<div className="select-wrap unit-category-filter"><select value={unitCategoryFilter} onChange={e=>setUnitCategoryFilter(e.target.value)}><option value="">すべて</option>{unitCategoryOptions.map(value=><option key={value} value={value}>{value}</option>)}</select><ChevronDown/></div></label>
           <label className="search-label">検索<div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="名称・説明・備考を検索"/>{query&&<button onClick={()=>setQuery('')}><X size={16}/></button>}</div></label>
           <div className="mode-block"><span>モード</span><button className={'mode '+(edit?'editing':'')} onClick={()=>edit?cancel():beginEdit()}><span className="toggle"><i/></span>{edit?<><Pencil/>編集モード</>:<><Check/>参照モード</>}</button></div>
         </div>
-        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong className={hasModelOverrides?'has-model-overrides':''}>{model.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><div className="local-actions"><button onClick={()=>localImportRef.current?.click()}><Upload size={17}/>ローカルへインポート</button><button disabled={!envelope} onClick={exportLocalBackup}><Download size={17}/>ローカルへエクスポート</button></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button><input ref={localImportRef} hidden type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)importLocalBackup(file);event.target.value=''}}/></div>
+        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong className={hasModelOverrides?'has-model-overrides':''}>{model.name}</strong><i>›</i><strong className={`cargo-badge ${hasCargoOverrides?'has-cargo-overrides':''}`}>{cargoType.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><div className="local-actions"><button onClick={()=>localImportRef.current?.click()}><Upload size={17}/>ローカルへインポート</button><button disabled={!envelope} onClick={exportLocalBackup}><Download size={17}/>ローカルへエクスポート</button></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button><input ref={localImportRef} hidden type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)importLocalBackup(file);event.target.value=''}}/></div>
         {(syncState==='cloud-newer'||syncState==='conflict'||syncState==='error')&&<div className={`cloud-alert ${syncState}`}><AlertTriangle/>{syncState==='cloud-newer'?'別のPCで、より新しいデータが保存されています':syncState==='conflict'?'ローカルとクラウドの変更が競合しています。自動バックアップを停止しました':cloudError}</div>}
       </section>
 
-      {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':'この型式だけ'}</b><small>{editScope==='series'?'青色の入力欄は全型式の共通値を変更します':'紫色は編集モード、黄色は保存済みの型式固有値です'}</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
+      {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':editScope==='model'?'この型式だけ':`搬送物 ${cargoType.name} だけ`}</b><small>{editScope==='series'?'青色は全型式の共通値です':editScope==='model'?'紫色は型式固有値です':'ピンク色は選択中の搬送物だけを変更します'}</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button><button className={editScope==='cargo'?'active':''} onClick={()=>setEditScope('cargo')}>この搬送物だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
 
       <section className="table-card">
-        <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em className={hasModelOverrides?'has-model-overrides':''}>{model.name}</em></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>この型式だけ違う値 <b>{Object.values(model.overrides).filter(x=>Object.keys(x).length).length}</b></button></div></div>
+        <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em className={hasModelOverrides?'has-model-overrides':''}>{model.name}</em><em className={`cargo-badge ${hasCargoOverrides?'has-cargo-overrides':''}`}>{cargoType.name}</em><button className="excel-export" disabled={!rows.length} onClick={exportParameterExcel}><Sheet/>Excel出力</button></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>型式・搬送物の差分 <b>{new Set([...Object.keys(model.overrides),...Object.keys(cargoType.overrides)]).size}</b></button></div></div>
         <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
           const changed=row.changedFields.includes(c.key); const editable=edit&&!['id','number'].includes(c.key);
-          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onInput={handleFieldInput(row,c.key)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onInput={handleFieldInput(row,c.key)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>型式固有</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={!row.changedFields.length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
+          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''} ${row.cargoChangedFields.includes(c.key)?'cargo-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onInput={handleFieldInput(row,c.key)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onInput={handleFieldInput(row,c.key)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>{row.cargoChangedFields.includes(c.key)?'搬送物固有':'型式固有'}</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={editScope==='cargo'?!row.cargoChangedFields.length:!Object.keys(model.overrides[row.id]??{}).length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
         <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
       </section>
     </main>
