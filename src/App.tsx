@@ -4,6 +4,7 @@ import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { seedData } from './data';
 import { loadData, saveData } from './storage';
+import { applyImport, recordsToParameters } from './importer';
 import type { Override, Parameter, ResolvedParameter, Series } from './types';
 
 const columns: { key: keyof Parameter; label: string }[] = [
@@ -17,6 +18,8 @@ export function App() {
   const [onlyDiff,setOnlyDiff]=useState(false); const [draft,setDraft]=useState<Series[]|null>(null);
   const [editScope,setEditScope]=useState<'model'|'series'>('model'); const [importOpen,setImportOpen]=useState(false);
   const [toast,setToast]=useState(''); const fileRef=useRef<HTMLInputElement>(null);
+  const [importScope,setImportScope]=useState<'series'|'model'>('series');
+  const [importing,setImporting]=useState(false); const [importError,setImportError]=useState('');
 
   useEffect(()=>{loadData().then(saved=>saved&&setData(saved)).catch(()=>undefined)},[]);
   const source=edit&&draft?draft:data; const series=source.find(s=>s.id===seriesId)??source[0];
@@ -39,10 +42,17 @@ export function App() {
   const resetOverride=(id:string)=>setDraft(current=>{if(!current)return current;const next=structuredClone(current);const m=next.find(s=>s.id===seriesId)!.models.find(x=>x.id===modelId)!;delete m.overrides[id];return next});
 
   async function importFile(file:File){
-    let records:Record<string,unknown>[]=[];
-    if(file.name.endsWith('.csv')) records=Papa.parse<Record<string,unknown>>(await file.text(),{header:true,skipEmptyLines:true}).data;
-    else {const wb=XLSX.read(await file.arrayBuffer());records=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]])}
-    setImportOpen(false);setToast(`${file.name}：${records.length}件を読み込みました（プレビュー）`);setTimeout(()=>setToast(''),3500);
+    setImporting(true);setImportError('');
+    try {
+      let records:Record<string,unknown>[]=[];
+      if(file.name.toLowerCase().endsWith('.csv')){const parsed=Papa.parse<Record<string,unknown>>(await file.text(),{header:true,skipEmptyLines:true});if(parsed.errors.length)throw new Error(parsed.errors[0].message);records=parsed.data}
+      else {const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});if(!wb.SheetNames.length)throw new Error('ワークシートがありません。');records=XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[wb.SheetNames[0]],{defval:'',raw:false})}
+      const converted=recordsToParameters(records);if(!converted.parameters.length)throw new Error('「パラメータNo」列を持つデータ行が見つかりません。1行目の見出しを確認してください。');
+      const next=structuredClone(data);const index=next.findIndex(item=>item.id===seriesId);next[index]=applyImport(next[index],modelId,converted.parameters,importScope);
+      setData(next);await saveData(next);setDraft(null);setEdit(false);setImportOpen(false);
+      const notes=[`${converted.parameters.length}件を登録しました`];if(converted.skippedRows)notes.push(`空行${converted.skippedRows}件を除外`);if(converted.unknownColumns.length)notes.push(`追加列${converted.unknownColumns.length}件も保持`);
+      setToast(`${file.name}：${notes.join('・')}`);setTimeout(()=>setToast(''),5000);
+    }catch(error){setImportError(error instanceof Error?error.message:'ファイルを読み込めませんでした。')}finally{setImporting(false)}
   }
 
   return <div className="app">
@@ -68,7 +78,7 @@ export function App() {
         <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
       </section>
     </main>
-    {importOpen&&<div className="modal-back" onMouseDown={()=>setImportOpen(false)}><div className="modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-x" onClick={()=>setImportOpen(false)}><X/></button><div className="modal-icon"><FileSpreadsheet/></div><h2>Excel / CSV インポート</h2><p>対象：<b>{series.name}</b> / <b>{model.name}</b></p><div className="import-scope"><label><input type="radio" name="import" defaultChecked/> シリーズ共通データ</label><label><input type="radio" name="import"/> 型式固有データ</label></div><div className="drop" onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f)importFile(f)}} onClick={()=>fileRef.current?.click()}><UploadCloud/><b>ファイルをドロップ</b><span>またはクリックして選択</span><small>.xlsx / .xls / .csv</small></div><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>e.target.files?.[0]&&importFile(e.target.files[0])}/></div></div>}
+    {importOpen&&<div className="modal-back" onMouseDown={()=>!importing&&setImportOpen(false)}><div className="modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-x" disabled={importing} onClick={()=>setImportOpen(false)}><X/></button><div className="modal-icon"><FileSpreadsheet/></div><h2>Excel / CSV インポート</h2><p>対象：<b>{series.name}</b> / <b>{model.name}</b></p><div className="import-scope"><label><input type="radio" name="import" checked={importScope==='series'} onChange={()=>setImportScope('series')}/> シリーズ共通データ</label><label><input type="radio" name="import" checked={importScope==='model'} onChange={()=>setImportScope('model')}/> 型式固有データ</label></div>{importError&&<div className="import-error">{importError}</div>}<div className={`drop ${importing?'loading':''}`} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&!importing)importFile(f)}} onClick={()=>!importing&&fileRef.current?.click()}><UploadCloud/><b>{importing?'読み込み・登録中…':'ファイルをドロップ'}</b><span>またはクリックして選択</span><small>.xlsx / .xls / .csv（先頭シートを読み込み）</small></div><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>{const file=e.target.files?.[0];if(file)importFile(file);e.target.value=''}}/></div></div>}
     {toast&&<div className="toast"><Check/>{toast}</div>}
   </div>
 }
