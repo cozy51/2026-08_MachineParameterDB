@@ -1,0 +1,159 @@
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Sheet, Trash2, Upload, UploadCloud, X } from 'lucide-react';
+import Papa from 'papaparse';
+import * as XLSX from 'xlsx';
+import { seedData } from './data';
+import { ensureEnvelope, loadData, saveData, writeEnvelope } from './storage';
+import { clearCloudSettings, compareBackups, currentUser, downloadBackup, loadCloudSettings, safeUpload, saveCloudSettings, signIn, signOut, supabase, validateBackup, type CloudBackup, type SyncState } from './backup';
+import { applyImport, recordsToParameters } from './importer';
+import type { BackupEnvelope, Override, Parameter, ResolvedParameter, Series } from './types';
+
+const columns: { key: keyof Parameter; label: string }[] = [
+  {key:'number',label:'パラメータNo.'},{key:'standardValue',label:'標準的な値'},{key:'unit',label:'単位'},{key:'unitCategory',label:'単位分類'},
+  {key:'name',label:'パラメータ名称'},{key:'detail',label:'設定値詳細'},{key:'note',label:'備考'},
+];
+
+export function App() {
+  const [data,setData]=useState<Series[]>(seedData); const [seriesId,setSeriesId]=useState('src350');
+  const [modelId,setModelId]=useState('src350-m3'); const [cargoTypeId,setCargoTypeId]=useState('foup'); const [parameterNumber,setParameterNumber]=useState(''); const [unitCategoryFilter,setUnitCategoryFilter]=useState(''); const [query,setQuery]=useState(''); const [edit,setEdit]=useState(false);
+  const [onlyDiff,setOnlyDiff]=useState(false); const [draft,setDraft]=useState<Series[]|null>(null);
+  const [editScope,setEditScope]=useState<'cargo'|'model'|'series'>('model'); const [importOpen,setImportOpen]=useState(false);
+  const [toast,setToast]=useState(''); const fileRef=useRef<HTMLInputElement>(null);
+  const localImportRef=useRef<HTMLInputElement>(null);
+  const [importScope,setImportScope]=useState<'series'|'model'>('series');
+  const [importing,setImporting]=useState(false); const [importError,setImportError]=useState('');
+  const [deleteTarget,setDeleteTarget]=useState<ResolvedParameter|null>(null);
+  const [envelope,setEnvelope]=useState<BackupEnvelope|null>(null);const [userId,setUserId]=useState('');
+  const [syncState,setSyncState]=useState<SyncState>(supabase?'local':'disabled');const [lastSync,setLastSync]=useState('');
+  const [cloudBackup,setCloudBackup]=useState<CloudBackup|null>(null);const [authOpen,setAuthOpen]=useState(false);
+  const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [cloudError,setCloudError]=useState('');
+  const initialCloudSettings=loadCloudSettings();const [supabaseUrl,setSupabaseUrl]=useState(initialCloudSettings?.url??'');const [supabaseAnonKey,setSupabaseAnonKey]=useState(initialCloudSettings?.anonKey??'');const [cloudConfigured,setCloudConfigured]=useState(Boolean(initialCloudSettings));
+
+  useEffect(()=>{loadData().then(async saved=>{const series=saved??seedData;setData(series);setEnvelope(await ensureEnvelope(series))}).catch(()=>undefined)},[]);
+  useEffect(()=>{
+    if(!toast)return;
+    const timer=window.setTimeout(()=>setToast(''),4000);
+    return ()=>window.clearTimeout(timer);
+  },[toast]);
+  useEffect(()=>{if(!supabase)return;currentUser().then(user=>{if(user)setUserId(user.id)});return supabase.auth.onAuthStateChange((_event,session)=>setUserId(session?.user.id??'')).data.subscription.unsubscribe},[]);
+  const source=edit&&draft?draft:data; const series=source.find(s=>s.id===seriesId)??source[0];
+  const model=series.models.find(m=>m.id===modelId)??series.models[0];
+  const cargoType=model.cargoTypes.find(item=>item.id===cargoTypeId)??model.cargoTypes[0];
+  const hasCargoOverrides=Object.values(cargoType.overrides).some(override=>Object.keys(override).length>0);
+  const hasModelOverrides=Object.values(model.overrides).some(override=>Object.keys(override).length>0);
+  useEffect(()=>{if(!series.models.some(m=>m.id===modelId))setModelId(series.models[0].id)},[series,modelId]);
+  useEffect(()=>{if(!model.cargoTypes.some(item=>item.id===cargoTypeId))setCargoTypeId(model.cargoTypes[0].id)},[model,cargoTypeId]);
+  const rows=useMemo(()=>series.parameters.map(p=>{
+    const modelOverride=model.overrides[p.id]??{};const cargoOverride=cargoType.overrides[p.id]??{};const override={...modelOverride,...cargoOverride}; const changedFields=Object.keys(override).filter(k=>override[k as keyof Override]!==p[k as keyof Parameter]);
+    return {...p,...override,override,changedFields,cargoChangedFields:Object.keys(cargoOverride)} as ResolvedParameter;
+  }).filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!parameterNumber||p.number===parameterNumber)&&(!unitCategoryFilter||p.unitCategory===unitCategoryFilter)&&(!query||[p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[series,model,cargoType,parameterNumber,unitCategoryFilter,query,onlyDiff]);
+  const parameterNumbers=useMemo(()=>[...new Set(series.parameters.map(parameter=>parameter.number))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),[series.parameters]);
+  useEffect(()=>{if(parameterNumber&&!parameterNumbers.includes(parameterNumber))setParameterNumber('')},[parameterNumber,parameterNumbers]);
+  const unitCategoryOptions=useMemo(()=>{
+    const values=new Set<string>();
+    source.forEach(item=>{
+      item.parameters.forEach(parameter=>{if(parameter.unitCategory.trim())values.add(parameter.unitCategory.trim())});
+      item.models.forEach(variant=>{Object.values(variant.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())});variant.cargoTypes.forEach(cargo=>Object.values(cargo.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())}))});
+    });
+    return [...values].sort((a,b)=>a.localeCompare(b,'ja'));
+  },[source]);
+  useEffect(()=>{if(unitCategoryFilter&&!unitCategoryOptions.includes(unitCategoryFilter))setUnitCategoryFilter('')},[unitCategoryFilter,unitCategoryOptions]);
+
+  const beginEdit=()=>{setDraft(structuredClone(data));setEdit(true)};
+  const cancel=()=>{setDraft(null);setEdit(false);setToast('変更を破棄しました')};
+  const persist=async()=>{if(!draft)return;setData(draft);setEnvelope(await saveData(draft));setDraft(null);setEdit(false);setToast('変更を保存しました')};
+  const update=(row:ResolvedParameter,key:keyof Parameter,value:string)=>setDraft(current=>{
+    if(!current)return current; const next=structuredClone(current); const s=next.find(x=>x.id===seriesId)!;
+    if(editScope==='series'){const p=s.parameters.find(x=>x.id===row.id)!;(p as unknown as Record<string,string>)[key]=value}
+    else if(editScope==='model'){const m=s.models.find(x=>x.id===modelId)!;m.overrides[row.id]??={};(m.overrides[row.id] as Record<string,string>)[key]=value}
+    else {const cargo=s.models.find(x=>x.id===modelId)!.cargoTypes.find(x=>x.id===cargoTypeId)!;cargo.overrides[row.id]??={};(cargo.overrides[row.id] as Record<string,string>)[key]=value}
+    return next;
+  });
+  const handleFieldInput=(row:ResolvedParameter,key:keyof Parameter)=>(event:FormEvent<HTMLInputElement|HTMLTextAreaElement>)=>update(row,key,event.currentTarget.value);
+  const resetOverride=(id:string)=>setDraft(current=>{if(!current)return current;const next=structuredClone(current);const m=next.find(s=>s.id===seriesId)!.models.find(x=>x.id===modelId)!;if(editScope==='cargo')delete m.cargoTypes.find(x=>x.id===cargoTypeId)!.overrides[id];else delete m.overrides[id];return next});
+  const deleteRow=()=>{
+    if(!deleteTarget)return;
+    const deleted=deleteTarget;
+    setDraft(current=>{if(!current)return current;const next=structuredClone(current);const target=next.find(s=>s.id===seriesId)!;target.parameters=target.parameters.filter(parameter=>parameter.id!==deleted.id);target.models.forEach(variant=>{delete variant.overrides[deleted.id];variant.cargoTypes.forEach(cargo=>delete cargo.overrides[deleted.id])});return next});
+    setDeleteTarget(null);setToast(`パラメータNo. ${deleted.number} を削除しました（保存前）`);
+  };
+
+  async function importFile(file:File){
+    setImporting(true);setImportError('');
+    try {
+      let records:Record<string,unknown>[]=[];
+      if(file.name.toLowerCase().endsWith('.csv')){const parsed=Papa.parse<Record<string,unknown>>(await file.text(),{header:true,skipEmptyLines:true});if(parsed.errors.length)throw new Error(parsed.errors[0].message);records=parsed.data}
+      else {const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});if(!wb.SheetNames.length)throw new Error('ワークシートがありません。');records=XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[wb.SheetNames[0]],{defval:'',raw:false})}
+      const converted=recordsToParameters(records);if(!converted.parameters.length)throw new Error('「パラメータNo」列を持つデータ行が見つかりません。1行目の見出しを確認してください。');
+      const next=structuredClone(data);const index=next.findIndex(item=>item.id===seriesId);next[index]=applyImport(next[index],modelId,converted.parameters,importScope);
+      setData(next);setEnvelope(await saveData(next));setDraft(null);setEdit(false);setImportOpen(false);
+      const notes=[`${converted.parameters.length}件を登録しました`];if(converted.skippedRows)notes.push(`空行${converted.skippedRows}件を除外`);if(converted.unknownColumns.length)notes.push(`追加列${converted.unknownColumns.length}件も保持`);
+      setToast(`${file.name}：${notes.join('・')}`);
+    }catch(error){setImportError(error instanceof Error?error.message:'ファイルを読み込めませんでした。')}finally{setImporting(false)}
+  }
+
+  function exportLocalBackup(){
+    if(!envelope)return;
+    const blob=new Blob([JSON.stringify(envelope,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`MachineParameterDB-${new Date().toISOString().slice(0,10)}-v${envelope.dataVersion}.json`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);setToast('ローカルバックアップを書き出しました');
+  }
+  function exportParameterExcel(){
+    const records=rows.map(row=>({'パラメータNo':row.number,'標準的な値':row.standardValue,'単位':row.unit,'単位分類':row.unitCategory,'パラメータ名称':row.name,'設定値詳細':row.detail,'備考':row.note,...(row.extra??{})}));
+    const sheet=XLSX.utils.json_to_sheet(records);sheet['!cols']=[{wch:16},{wch:14},{wch:10},{wch:14},{wch:28},{wch:72},{wch:28}];const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,'パラメータ一覧');
+    XLSX.writeFile(book,`${series.name}-${model.name}-${cargoType.name}-parameters.xlsx`);setToast(`${rows.length}件をExcel出力しました`);
+  }
+  async function importLocalBackup(file:File){
+    setCloudError('');
+    try{
+      const imported=validateBackup(JSON.parse(await file.text()));
+      if(!window.confirm(`ローカルデータをバックアップ（世代 ${imported.dataVersion}）で置き換えますか？\n現在のデータは、復元に失敗した場合に元へ戻されます。`))return;
+      const previous=envelope;
+      try{await writeEnvelope(imported);setData(imported.data.series);setEnvelope(imported);setDraft(null);setEdit(false);setParameterNumber('');setSyncState(userId?'local-newer':supabase?'local':'disabled');setToast('ローカルバックアップを取り込みました')}
+      catch(error){if(previous)await writeEnvelope(previous);throw error}
+    }catch(error){setToast(`インポート失敗：${error instanceof Error?error.message:'JSONを確認してください'}`)}
+  }
+
+  async function checkCloud(){if(!userId||!envelope)return;setSyncState('checking');setCloudError('');try{const cloud=await downloadBackup(userId);setCloudBackup(cloud);if(!cloud){setSyncState('local-newer');return}const relation=await compareBackups(envelope,cloud.envelope);setSyncState(relation==='same'?'synced':relation);if(relation==='same')setLastSync(cloud.serverUpdatedAt??cloud.envelope.updatedAt)}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'クラウド確認に失敗しました')}}
+  useEffect(()=>{if(userId&&envelope)checkCloud()},[userId,Boolean(envelope)]);
+  async function uploadCloud(force=false){if(!userId||!envelope){setAuthOpen(true);return}setSyncState('uploading');setCloudError('');try{const result=await safeUpload(userId,envelope,force);if(!result.uploaded){setCloudBackup(result.cloud??null);setSyncState(result.relation);return}setSyncState('synced');setLastSync(new Date().toISOString());setToast('クラウドへバックアップしました')}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'クラウド保存に失敗しました')}}
+  useEffect(()=>{if(!userId||!envelope||syncState==='conflict'||syncState==='cloud-newer')return;const timer=window.setTimeout(()=>uploadCloud(),2000);return()=>clearTimeout(timer)},[envelope?.dataVersion,userId]);
+  async function restoreCloud(){if(!userId)return;try{const cloud=cloudBackup??await downloadBackup(userId);if(!cloud)return;if(!window.confirm('クラウドデータでローカルを更新しますか？ 現在のローカルデータは安全に退避してから復元します。'))return;const old=envelope;try{await writeEnvelope(cloud.envelope);setData(cloud.envelope.data.series);setEnvelope(cloud.envelope);setSyncState('synced');setLastSync(cloud.serverUpdatedAt??cloud.envelope.updatedAt);setToast('クラウドから更新しました')}catch(error){if(old)await writeEnvelope(old);throw error}}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'復元に失敗しました')}}
+  async function login(){try{await signIn(email,password);const user=await currentUser();setUserId(user?.id??'');setAuthOpen(false);setPassword('')}catch(error){setCloudError(error instanceof Error?error.message:'ログインに失敗しました')}}
+  function applyCloudSettings(){try{saveCloudSettings({url:supabaseUrl,anonKey:supabaseAnonKey});setCloudConfigured(true);setSyncState('local');setCloudError('');setToast('クラウド接続設定を保存しました')}catch(error){setCloudError(error instanceof Error?error.message:'設定を保存できませんでした')}}
+  async function removeCloudSettings(){if(!window.confirm('このブラウザのSupabase接続設定を削除しますか？ IndexedDBのデータは削除されません。'))return;await signOut();clearCloudSettings();setCloudConfigured(false);setUserId('');setSyncState('disabled');setSupabaseUrl('');setSupabaseAnonKey('');setCloudError('')}
+  const syncLabels:Record<SyncState,string>={disabled:'ローカル保存済み',local:'ローカル保存済み',checking:'クラウド確認中',synced:'クラウドと同期済み',uploading:'クラウド保存中','local-newer':'ローカルに新しい変更あり','cloud-newer':'クラウドに新しいデータあり',conflict:'同期競合',error:'クラウド保存失敗'};
+  const syncLabel=syncLabels[syncState];
+
+  return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''} ${hasCargoOverrides?'has-cargo-overrides':''}`}>
+    <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><div className={`sync-status sync-${syncState}`} title={cloudError||`データ世代: ${envelope?.dataVersion??0}`}><span/>{syncLabel}{lastSync&&<small>{new Date(lastSync).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small>}</div>{userId?<button className="cloud-auth" onClick={()=>signOut()}>ログアウト</button>:<button className="cloud-auth" onClick={()=>setAuthOpen(true)}><CloudCog/>クラウド設定</button>}<button className="help"><CircleHelp size={19}/></button></div></header>
+    <main>
+      <section className="control-card">
+        <div className="selectors has-parameter-filter">
+          <label>シリーズ<div className="select-wrap"><Layers3 size={17}/><select value={seriesId} onChange={e=>setSeriesId(e.target.value)}>{source.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select><ChevronDown/></div></label>
+          <label>型式<div className={`select-wrap model ${hasModelOverrides?'has-model-overrides':''}`}><select value={modelId} onChange={e=>setModelId(e.target.value)}>{series.models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown/></div></label>
+          <label>搬送物<div className={`select-wrap cargo ${hasCargoOverrides?'has-cargo-overrides':''}`}><select value={cargoTypeId} onChange={e=>setCargoTypeId(e.target.value)}>{model.cargoTypes.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown/></div></label>
+          <label>パラメータNo.<div className="select-wrap parameter-number"><select value={parameterNumber} onChange={e=>setParameterNumber(e.target.value)}><option value="">すべて</option>{parameterNumbers.map(number=><option key={number} value={number}>{number}</option>)}</select><ChevronDown/></div></label>
+          <label>単位分類<div className="select-wrap unit-category-filter"><select value={unitCategoryFilter} onChange={e=>setUnitCategoryFilter(e.target.value)}><option value="">すべて</option>{unitCategoryOptions.map(value=><option key={value} value={value}>{value}</option>)}</select><ChevronDown/></div></label>
+          <label className="search-label">検索<div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="名称・説明・備考を検索"/>{query&&<button onClick={()=>setQuery('')}><X size={16}/></button>}</div></label>
+          <div className="mode-block"><span>モード</span><button className={'mode '+(edit?'editing':'')} onClick={()=>edit?cancel():beginEdit()}><span className="toggle"><i/></span>{edit?<><Pencil/>編集モード</>:<><Check/>参照モード</>}</button></div>
+        </div>
+        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong className={hasModelOverrides?'has-model-overrides':''}>{model.name}</strong><i>›</i><strong className={`cargo-badge ${hasCargoOverrides?'has-cargo-overrides':''}`}>{cargoType.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><div className="local-actions"><button onClick={()=>localImportRef.current?.click()}><Upload size={17}/>ローカルへインポート</button><button disabled={!envelope} onClick={exportLocalBackup}><Download size={17}/>ローカルへエクスポート</button></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button><input ref={localImportRef} hidden type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)importLocalBackup(file);event.target.value=''}}/></div>
+        {(syncState==='cloud-newer'||syncState==='conflict'||syncState==='error')&&<div className={`cloud-alert ${syncState}`}><AlertTriangle/>{syncState==='cloud-newer'?'別のPCで、より新しいデータが保存されています':syncState==='conflict'?'ローカルとクラウドの変更が競合しています。自動バックアップを停止しました':cloudError}</div>}
+      </section>
+
+      {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':editScope==='model'?'この型式だけ':`搬送物 ${cargoType.name} だけ`}</b><small>{editScope==='series'?'青色は全型式の共通値です':editScope==='model'?'紫色は型式固有値です':'ピンク色は選択中の搬送物だけを変更します'}</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button><button className={editScope==='cargo'?'active':''} onClick={()=>setEditScope('cargo')}>この搬送物だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
+
+      <section className="table-card">
+        <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em className={hasModelOverrides?'has-model-overrides':''}>{model.name}</em><em className={`cargo-badge ${hasCargoOverrides?'has-cargo-overrides':''}`}>{cargoType.name}</em><button className="excel-export" disabled={!rows.length} onClick={exportParameterExcel}><Sheet/>Excel出力</button></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>型式・搬送物の差分 <b>{new Set([...Object.keys(model.overrides),...Object.keys(cargoType.overrides)]).size}</b></button></div></div>
+        <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
+          const changed=row.changedFields.includes(c.key); const editable=edit&&!['id','number'].includes(c.key);
+          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''} ${row.cargoChangedFields.includes(c.key)?'cargo-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onInput={handleFieldInput(row,c.key)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onInput={handleFieldInput(row,c.key)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>{row.cargoChangedFields.includes(c.key)?'搬送物固有':'型式固有'}</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={editScope==='cargo'?!row.cargoChangedFields.length:!Object.keys(model.overrides[row.id]??{}).length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
+        <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
+      </section>
+    </main>
+    {importOpen&&<div className="modal-back" onMouseDown={()=>!importing&&setImportOpen(false)}><div className="modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-x" disabled={importing} onClick={()=>setImportOpen(false)}><X/></button><div className="modal-icon"><FileSpreadsheet/></div><h2>Excel / CSV インポート</h2><p>対象：<b>{series.name}</b> / <b>{model.name}</b></p><div className="import-scope"><label><input type="radio" name="import" checked={importScope==='series'} onChange={()=>setImportScope('series')}/> シリーズ共通データ</label><label><input type="radio" name="import" checked={importScope==='model'} onChange={()=>setImportScope('model')}/> 型式固有データ</label></div>{importError&&<div className="import-error">{importError}</div>}<div className={`drop ${importing?'loading':''}`} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&!importing)importFile(f)}} onClick={()=>!importing&&fileRef.current?.click()}><UploadCloud/><b>{importing?'読み込み・登録中…':'ファイルをドロップ'}</b><span>またはクリックして選択</span><small>.xlsx / .xls / .csv（先頭シートを読み込み）</small></div><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>{const file=e.target.files?.[0];if(file)importFile(file);e.target.value=''}}/></div></div>}
+    {toast&&<div className="toast" role="status" aria-live="polite"><Check/>{toast}</div>}
+    {deleteTarget&&<div className="modal-back confirm-back" role="presentation" onMouseDown={()=>setDeleteTarget(null)}><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" onMouseDown={event=>event.stopPropagation()}><div className="confirm-icon"><AlertTriangle/></div><h2 id="delete-title">この行を削除しますか？</h2><p><b>パラメータNo. {deleteTarget.number}</b>{deleteTarget.name&&deleteTarget.name!=='-'?`「${deleteTarget.name}」`:''}を削除します。</p><div className="delete-warning">シリーズ共通の行と、すべての型式固有値が削除対象になります。変更を保存するまではキャンセルできます。</div><div className="confirm-actions"><button onClick={()=>setDeleteTarget(null)}>削除しない</button><button className="confirm-delete" onClick={deleteRow}><Trash2/>行を削除</button></div></div></div>}
+    {authOpen&&<div className="modal-back" onMouseDown={()=>setAuthOpen(false)}><div className="auth-dialog cloud-settings" onMouseDown={event=>event.stopPropagation()}><button className="modal-x" onClick={()=>setAuthOpen(false)}><X/></button><div className="settings-title"><CloudCog/><div><h2>クラウドバックアップ設定</h2><p>Supabase Storageへの接続とログインを設定します。</p></div></div><div className={`setup-status ${cloudConfigured?'ready':'missing'}`}>{cloudConfigured?<Check/>:<AlertTriangle/>}<div><b>{cloudConfigured?'Supabase接続設定済み':'Supabase接続情報を入力してください'}</b><span>Project Settings → APIで確認できます。</span></div></div>{cloudError&&<div className="import-error">{cloudError}</div>}<label>Supabase URL<input type="url" placeholder="https://xxxx.supabase.co" value={supabaseUrl} onChange={event=>setSupabaseUrl(event.target.value)}/></label><label>Anon Key<input type="password" placeholder="SupabaseのAnon Key" value={supabaseAnonKey} onChange={event=>setSupabaseAnonKey(event.target.value)}/></label><button className="auth-submit" disabled={!supabaseUrl||!supabaseAnonKey} onClick={applyCloudSettings}>接続設定を保存</button><p className="settings-note">Anon Keyは公開クライアント用のキーです。Service Role Keyは絶対に入力しないでください。設定はこのブラウザ内に保存されます。</p>{cloudConfigured&&<><hr/><label>メールアドレス<input type="email" value={email} onChange={event=>setEmail(event.target.value)}/></label><label>パスワード<input type="password" value={password} onChange={event=>setPassword(event.target.value)}/></label><button className="auth-submit" disabled={!email||!password} onClick={login}>ログイン</button><button className="remove-cloud-settings" onClick={removeCloudSettings}>接続設定を削除</button></>}</div></div>}
+  </div>
+}
