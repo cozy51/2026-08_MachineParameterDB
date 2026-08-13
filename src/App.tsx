@@ -3,9 +3,10 @@ import { AlertTriangle, Check, ChevronDown, CircleHelp, Database, FileSpreadshee
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { seedData } from './data';
-import { loadData, saveData } from './storage';
+import { ensureEnvelope, loadData, saveData, writeEnvelope } from './storage';
+import { compareBackups, currentUser, downloadBackup, safeUpload, signIn, signOut, supabase, type CloudBackup, type SyncState } from './backup';
 import { applyImport, recordsToParameters } from './importer';
-import type { Override, Parameter, ResolvedParameter, Series } from './types';
+import type { BackupEnvelope, Override, Parameter, ResolvedParameter, Series } from './types';
 
 const columns: { key: keyof Parameter; label: string }[] = [
   {key:'number',label:'パラメータNo.'},{key:'standardValue',label:'標準的な値'},{key:'unit',label:'単位'},
@@ -21,8 +22,18 @@ export function App() {
   const [importScope,setImportScope]=useState<'series'|'model'>('series');
   const [importing,setImporting]=useState(false); const [importError,setImportError]=useState('');
   const [deleteTarget,setDeleteTarget]=useState<ResolvedParameter|null>(null);
+  const [envelope,setEnvelope]=useState<BackupEnvelope|null>(null);const [userId,setUserId]=useState('');
+  const [syncState,setSyncState]=useState<SyncState>(supabase?'local':'disabled');const [lastSync,setLastSync]=useState('');
+  const [cloudBackup,setCloudBackup]=useState<CloudBackup|null>(null);const [authOpen,setAuthOpen]=useState(false);
+  const [email,setEmail]=useState('');const [password,setPassword]=useState('');const [cloudError,setCloudError]=useState('');
 
-  useEffect(()=>{loadData().then(saved=>saved&&setData(saved)).catch(()=>undefined)},[]);
+  useEffect(()=>{loadData().then(async saved=>{const series=saved??seedData;setData(series);setEnvelope(await ensureEnvelope(series))}).catch(()=>undefined)},[]);
+  useEffect(()=>{
+    if(!toast)return;
+    const timer=window.setTimeout(()=>setToast(''),4000);
+    return ()=>window.clearTimeout(timer);
+  },[toast]);
+  useEffect(()=>{if(!supabase)return;currentUser().then(user=>{if(user)setUserId(user.id)});return supabase.auth.onAuthStateChange((_event,session)=>setUserId(session?.user.id??'')).data.subscription.unsubscribe},[]);
   const source=edit&&draft?draft:data; const series=source.find(s=>s.id===seriesId)??source[0];
   const model=series.models.find(m=>m.id===modelId)??series.models[0];
   useEffect(()=>{if(!series.models.some(m=>m.id===modelId))setModelId(series.models[0].id)},[series,modelId]);
@@ -41,7 +52,7 @@ export function App() {
 
   const beginEdit=()=>{setDraft(structuredClone(data));setEdit(true)};
   const cancel=()=>{setDraft(null);setEdit(false);setToast('変更を破棄しました')};
-  const persist=async()=>{if(!draft)return;setData(draft);await saveData(draft);setDraft(null);setEdit(false);setToast('変更を保存しました');setTimeout(()=>setToast(''),2500)};
+  const persist=async()=>{if(!draft)return;setData(draft);setEnvelope(await saveData(draft));setDraft(null);setEdit(false);setToast('変更を保存しました')};
   const update=(row:ResolvedParameter,key:keyof Parameter,value:string)=>setDraft(current=>{
     if(!current)return current; const next=structuredClone(current); const s=next.find(x=>x.id===seriesId)!;
     if(editScope==='series'){const p=s.parameters.find(x=>x.id===row.id)!;(p as unknown as Record<string,string>)[key]=value}
@@ -53,7 +64,7 @@ export function App() {
     if(!deleteTarget)return;
     const deleted=deleteTarget;
     setDraft(current=>{if(!current)return current;const next=structuredClone(current);const target=next.find(s=>s.id===seriesId)!;target.parameters=target.parameters.filter(parameter=>parameter.id!==deleted.id);target.models.forEach(variant=>delete variant.overrides[deleted.id]);return next});
-    setDeleteTarget(null);setToast(`パラメータNo. ${deleted.number} を削除しました（保存前）`);setTimeout(()=>setToast(''),3000);
+    setDeleteTarget(null);setToast(`パラメータNo. ${deleted.number} を削除しました（保存前）`);
   };
 
   async function importFile(file:File){
@@ -64,14 +75,23 @@ export function App() {
       else {const wb=XLSX.read(await file.arrayBuffer(),{type:'array'});if(!wb.SheetNames.length)throw new Error('ワークシートがありません。');records=XLSX.utils.sheet_to_json<Record<string,unknown>>(wb.Sheets[wb.SheetNames[0]],{defval:'',raw:false})}
       const converted=recordsToParameters(records);if(!converted.parameters.length)throw new Error('「パラメータNo」列を持つデータ行が見つかりません。1行目の見出しを確認してください。');
       const next=structuredClone(data);const index=next.findIndex(item=>item.id===seriesId);next[index]=applyImport(next[index],modelId,converted.parameters,importScope);
-      setData(next);await saveData(next);setDraft(null);setEdit(false);setImportOpen(false);
+      setData(next);setEnvelope(await saveData(next));setDraft(null);setEdit(false);setImportOpen(false);
       const notes=[`${converted.parameters.length}件を登録しました`];if(converted.skippedRows)notes.push(`空行${converted.skippedRows}件を除外`);if(converted.unknownColumns.length)notes.push(`追加列${converted.unknownColumns.length}件も保持`);
-      setToast(`${file.name}：${notes.join('・')}`);setTimeout(()=>setToast(''),5000);
+      setToast(`${file.name}：${notes.join('・')}`);
     }catch(error){setImportError(error instanceof Error?error.message:'ファイルを読み込めませんでした。')}finally{setImporting(false)}
   }
 
+  async function checkCloud(){if(!userId||!envelope)return;setSyncState('checking');setCloudError('');try{const cloud=await downloadBackup(userId);setCloudBackup(cloud);if(!cloud){setSyncState('local-newer');return}const relation=await compareBackups(envelope,cloud.envelope);setSyncState(relation==='same'?'synced':relation);if(relation==='same')setLastSync(cloud.serverUpdatedAt??cloud.envelope.updatedAt)}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'クラウド確認に失敗しました')}}
+  useEffect(()=>{if(userId&&envelope)checkCloud()},[userId,Boolean(envelope)]);
+  async function uploadCloud(force=false){if(!userId||!envelope){setAuthOpen(true);return}setSyncState('uploading');setCloudError('');try{const result=await safeUpload(userId,envelope,force);if(!result.uploaded){setCloudBackup(result.cloud??null);setSyncState(result.relation);return}setSyncState('synced');setLastSync(new Date().toISOString());setToast('クラウドへバックアップしました')}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'クラウド保存に失敗しました')}}
+  useEffect(()=>{if(!userId||!envelope||syncState==='conflict'||syncState==='cloud-newer')return;const timer=window.setTimeout(()=>uploadCloud(),2000);return()=>clearTimeout(timer)},[envelope?.dataVersion,userId]);
+  async function restoreCloud(){if(!userId)return;try{const cloud=cloudBackup??await downloadBackup(userId);if(!cloud)return;if(!window.confirm('クラウドデータでローカルを更新しますか？ 現在のローカルデータは安全に退避してから復元します。'))return;const old=envelope;try{await writeEnvelope(cloud.envelope);setData(cloud.envelope.data.series);setEnvelope(cloud.envelope);setSyncState('synced');setLastSync(cloud.serverUpdatedAt??cloud.envelope.updatedAt);setToast('クラウドから更新しました')}catch(error){if(old)await writeEnvelope(old);throw error}}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'復元に失敗しました')}}
+  async function login(){try{await signIn(email,password);setAuthOpen(false);setPassword('')}catch(error){setCloudError(error instanceof Error?error.message:'ログインに失敗しました')}}
+  const syncLabels:Record<SyncState,string>={disabled:'ローカル保存済み',local:'ローカル保存済み',checking:'クラウド確認中',synced:'クラウドと同期済み',uploading:'クラウド保存中','local-newer':'ローカルに新しい変更あり','cloud-newer':'クラウドに新しいデータあり',conflict:'同期競合',error:'クラウド保存失敗'};
+  const syncLabel=syncLabels[syncState];
+
   return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''}`}>
-    <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><span className="storage"><span/> ローカル保存</span><button className="help"><CircleHelp size={19}/></button></div></header>
+    <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><div className={`sync-status sync-${syncState}`} title={cloudError||`データ世代: ${envelope?.dataVersion??0}`}><span/>{syncLabel}{lastSync&&<small>{new Date(lastSync).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small>}</div>{userId?<button className="cloud-auth" onClick={()=>signOut()}>ログアウト</button>:<button className="cloud-auth" disabled={!supabase} onClick={()=>setAuthOpen(true)}>クラウドログイン</button>}<button className="help"><CircleHelp size={19}/></button></div></header>
     <main>
       <section className="control-card">
         <div className="selectors">
@@ -80,7 +100,8 @@ export function App() {
           <label className="search-label">検索<div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="パラメータNo・名称・説明を検索"/>{query&&<button onClick={()=>setQuery('')}><X size={16}/></button>}</div></label>
           <div className="mode-block"><span>モード</span><button className={'mode '+(edit?'editing':'')} onClick={()=>edit?cancel():beginEdit()}><span className="toggle"><i/></span>{edit?<><Pencil/>編集モード</>:<><Check/>参照モード</>}</button></div>
         </div>
-        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong>{model.name}</strong></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button></div>
+        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong>{model.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button></div>
+        {(syncState==='cloud-newer'||syncState==='conflict'||syncState==='error')&&<div className={`cloud-alert ${syncState}`}><AlertTriangle/>{syncState==='cloud-newer'?'別のPCで、より新しいデータが保存されています':syncState==='conflict'?'ローカルとクラウドの変更が競合しています。自動バックアップを停止しました':cloudError}</div>}
       </section>
 
       {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':'この型式だけ'}</b><small>{editScope==='series'?'青色の入力欄は全型式の共通値を変更します':'黄色の入力欄はこの型式だけ変更します'}</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
@@ -94,7 +115,8 @@ export function App() {
       </section>
     </main>
     {importOpen&&<div className="modal-back" onMouseDown={()=>!importing&&setImportOpen(false)}><div className="modal" onMouseDown={e=>e.stopPropagation()}><button className="modal-x" disabled={importing} onClick={()=>setImportOpen(false)}><X/></button><div className="modal-icon"><FileSpreadsheet/></div><h2>Excel / CSV インポート</h2><p>対象：<b>{series.name}</b> / <b>{model.name}</b></p><div className="import-scope"><label><input type="radio" name="import" checked={importScope==='series'} onChange={()=>setImportScope('series')}/> シリーズ共通データ</label><label><input type="radio" name="import" checked={importScope==='model'} onChange={()=>setImportScope('model')}/> 型式固有データ</label></div>{importError&&<div className="import-error">{importError}</div>}<div className={`drop ${importing?'loading':''}`} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f&&!importing)importFile(f)}} onClick={()=>!importing&&fileRef.current?.click()}><UploadCloud/><b>{importing?'読み込み・登録中…':'ファイルをドロップ'}</b><span>またはクリックして選択</span><small>.xlsx / .xls / .csv（先頭シートを読み込み）</small></div><input ref={fileRef} hidden type="file" accept=".xlsx,.xls,.csv" onChange={e=>{const file=e.target.files?.[0];if(file)importFile(file);e.target.value=''}}/></div></div>}
-    {toast&&<div className="toast"><Check/>{toast}</div>}
+    {toast&&<div className="toast" role="status" aria-live="polite"><Check/>{toast}</div>}
     {deleteTarget&&<div className="modal-back confirm-back" role="presentation" onMouseDown={()=>setDeleteTarget(null)}><div className="confirm-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" onMouseDown={event=>event.stopPropagation()}><div className="confirm-icon"><AlertTriangle/></div><h2 id="delete-title">この行を削除しますか？</h2><p><b>パラメータNo. {deleteTarget.number}</b>{deleteTarget.name&&deleteTarget.name!=='-'?`「${deleteTarget.name}」`:''}を削除します。</p><div className="delete-warning">シリーズ共通の行と、すべての型式固有値が削除対象になります。変更を保存するまではキャンセルできます。</div><div className="confirm-actions"><button onClick={()=>setDeleteTarget(null)}>削除しない</button><button className="confirm-delete" onClick={deleteRow}><Trash2/>行を削除</button></div></div></div>}
+    {authOpen&&<div className="modal-back" onMouseDown={()=>setAuthOpen(false)}><div className="auth-dialog" onMouseDown={event=>event.stopPropagation()}><button className="modal-x" onClick={()=>setAuthOpen(false)}><X/></button><h2>クラウドバックアップにログイン</h2><p>Supabase Authのメールアドレスとパスワードを入力してください。</p>{cloudError&&<div className="import-error">{cloudError}</div>}<label>メールアドレス<input type="email" value={email} onChange={event=>setEmail(event.target.value)}/></label><label>パスワード<input type="password" value={password} onChange={event=>setPassword(event.target.value)}/></label><button className="auth-submit" disabled={!email||!password} onClick={login}>ログイン</button></div></div>}
   </div>
 }
