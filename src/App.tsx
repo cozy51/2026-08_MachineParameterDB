@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Sheet, Trash2, Upload, UploadCloud, X } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Sheet, Trash2, Upload, UploadCloud, X } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
+import { Brandmark } from './Brandmark';
 import { seedData } from './data';
 import { ensureEnvelope, loadData, saveData, writeEnvelope } from './storage';
 import { clearCloudSettings, compareBackups, currentUser, downloadBackup, loadCloudSettings, safeUpload, saveCloudSettings, signIn, signOut, supabase, validateBackup, type CloudBackup, type SyncState } from './backup';
@@ -129,7 +130,7 @@ export function App() {
   const syncLabel=syncLabels[syncState];
 
   return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''} ${hasCargoOverrides?'has-cargo-overrides':''}`}>
-    <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><div className={`sync-status sync-${syncState}`} title={cloudError||`データ世代: ${envelope?.dataVersion??0}`}><span/>{syncLabel}{lastSync&&<small>{new Date(lastSync).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small>}</div>{userId?<button className="cloud-auth" onClick={()=>signOut()}>ログアウト</button>:<button className="cloud-auth" onClick={()=>setAuthOpen(true)}><CloudCog/>クラウド設定</button>}<button className="help"><CircleHelp size={19}/></button></div></header>
+    <header><Brandmark/><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><div className={`sync-status sync-${syncState}`} title={cloudError||`データ世代: ${envelope?.dataVersion??0}`}><span/>{syncLabel}{lastSync&&<small>{new Date(lastSync).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})}</small>}</div>{userId?<button className="cloud-auth" onClick={()=>signOut()}>ログアウト</button>:<button className="cloud-auth" onClick={()=>setAuthOpen(true)}><CloudCog/>クラウド設定</button>}<button className="help"><CircleHelp size={19}/></button></div></header>
     <main>
       <section className="control-card">
         <div className="selectors has-parameter-filter">

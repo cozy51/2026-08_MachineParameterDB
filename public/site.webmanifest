@@ -1,0 +1,15 @@
+{
+  "name": "機械パラメータ管理",
+  "short_name": "パラメータ管理",
+  "description": "機械パラメータの参照・編集・同期を行う社内データベース",
+  "lang": "ja",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f3f6f9",
+  "theme_color": "#086a78",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

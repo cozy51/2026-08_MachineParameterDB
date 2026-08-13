@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="機械パラメータ管理">
+  <defs>
+    <linearGradient id="fav-tile" x1="8" y1="2" x2="56" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12909f"/>
+      <stop offset="0.55" stop-color="#0a7381"/>
+      <stop offset="1" stop-color="#044b58"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="13" fill="url(#fav-tile)"/>
+  <g stroke-linecap="round" stroke-width="6.5" fill="none">
+    <path d="M12 19h40" stroke="#ffffff" stroke-opacity="0.34"/>
+    <path d="M12 32h40" stroke="#ffffff" stroke-opacity="0.34"/>
+    <path d="M12 45h40" stroke="#ffffff" stroke-opacity="0.34"/>
+    <path d="M12 19h26" stroke="#ffffff"/>
+    <path d="M12 32h10" stroke="#ffffff"/>
+    <path d="M12 45h19" stroke="#ffffff"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="38" cy="19" r="6"/>
+    <circle cx="22" cy="32" r="6"/>
+    <circle cx="31" cy="45" r="6"/>
+  </g>
+</svg>
