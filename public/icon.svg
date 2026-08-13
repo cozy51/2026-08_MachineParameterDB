@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="機械パラメータ管理">
+  <defs>
+    <linearGradient id="mpdb-tile" x1="8" y1="2" x2="56" y2="62" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#12909f"/>
+      <stop offset="0.55" stop-color="#0a7381"/>
+      <stop offset="1" stop-color="#044b58"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#mpdb-tile)"/>
+  <rect x="0.9" y="0.9" width="62.2" height="62.2" rx="14.2" fill="none" stroke="#ffffff" stroke-opacity="0.18" stroke-width="1.2"/>
+  <g stroke-linecap="round" stroke-width="5" fill="none">
+    <path d="M13 20h38" stroke="#ffffff" stroke-opacity="0.3"/>
+    <path d="M13 32h38" stroke="#ffffff" stroke-opacity="0.3"/>
+    <path d="M13 44h38" stroke="#ffffff" stroke-opacity="0.3"/>
+    <path d="M13 20h25" stroke="#ffffff" stroke-opacity="0.85"/>
+    <path d="M13 32h10" stroke="#ffffff" stroke-opacity="0.85"/>
+    <path d="M13 44h18" stroke="#ffffff" stroke-opacity="0.85"/>
+  </g>
+  <g fill="#ffffff">
+    <circle cx="38" cy="20" r="5"/>
+    <circle cx="23" cy="32" r="5"/>
+    <circle cx="31" cy="44" r="5"/>
+  </g>
+</svg>
