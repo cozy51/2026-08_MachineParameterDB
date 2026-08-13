@@ -6,7 +6,7 @@ React + Vite + TypeScript で構築した、機種シリーズ／派生型式ご
 
 - SRC350の名称は「天井搬送台車」、HU300の名称は「300mm FOUP移載機」。シリーズ → 型式 → 搬送物の3階層で差分を保持
 - SRC350-M2/M3はFOUP・Reticle、HU300-M3はFOUPを選択可能
-- 搬送物固有の設定値はピンク色で表示・編集
+- SRC350はSRC350-M2／FOUPを基本選択とし、搬送物固有値は塗りつぶさず赤い文字と左線で型式固有値から独立して表示
 - パラメータNo.は独立したドロップダウンで選択し、名称・詳細・備考はキーワード検索
 - 単位分類のドロップダウン絞り込みと、表示中一覧のExcel出力
 - 型式固有値のハイライトと差分フィルター
@@ -66,4 +66,4 @@ using (bucket_id = 'machine-parameter-backups' and (storage.foldername(name))[1]
 with check (bucket_id = 'machine-parameter-backups' and (storage.foldername(name))[1] = auth.uid()::text);
 ```
 
-保存先は`<user-id>/MachineParameterDB-latest.json`です。ローカル変更の2秒後に、クラウド最新版を再取得してから自動バックアップします。`dataVersion`、`updatedAt`、データ内容のSHA-256を併用し、クラウドが新しい場合や矛盾がある場合は自動上書きを停止します。クラウド通信に失敗してもIndexedDBへの保存と通常操作は継続します。
+保存先は`<user-id>/MachineParameterDB-latest.json`です。ローカル変更の2秒後に、クラウド最新版を再取得してから自動バックアップします。`dataVersion`、`updatedAt`、データ内容のSHA-256を併用し、クラウドが新しい場合や矛盾がある場合は自動上書きを停止し、「競合を確認・解決」画面でクラウド取得・ローカル確認・非推奨の強制上書きを選択します。強制上書き前にはローカル・クラウド双方の更新日時、世代、パラメータ件数を比較表示します。クラウド通信に失敗してもIndexedDBへの保存と通常操作は継続します。
