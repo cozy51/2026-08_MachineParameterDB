@@ -5,7 +5,7 @@ const STORE = 'app-data';
 const KEY = 'series';
 const META_KEY = 'backup-envelope';
 const DEVICE_KEY = 'machine-parameter-device-id';
-export function normalizeSeries(data:Series[]):Series[]{return data.map(series=>({...series,description:series.id==='hu300'?'300mm FOUP移載機':'天井搬送台車',models:series.models.map(model=>({...model,cargoTypes:model.cargoTypes?.length?model.cargoTypes:(model.id==='hu300-m3'?[{id:'foup',name:'FOUP',overrides:{}}]:[{id:'foup',name:'FOUP',overrides:{}},{id:'reticle',name:'Reticle',overrides:{}}])}))}))}
+export function normalizeSeries(data:Series[]):Series[]{return data.map(source=>{const series=structuredClone(source);series.description=series.id==='hu300'?'300mm FOUP移載機':'天井搬送台車';series.models=series.models.map(model=>({...model,cargoTypes:model.cargoTypes?.length?model.cargoTypes:(model.id==='hu300-m3'?[{id:'foup',name:'FOUP',overrides:{}}]:[{id:'foup',name:'FOUP',overrides:{}},{id:'reticle',name:'Reticle',overrides:{}}])}));if(series.id==='hu300'){const base=series.models.find(model=>model.id==='hu300-m3');if(base){Object.entries(base.overrides).forEach(([parameterId,override])=>{const parameter=series.parameters.find(item=>item.id===parameterId);if(parameter)Object.assign(parameter,override)});base.overrides={}}}return series})}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
