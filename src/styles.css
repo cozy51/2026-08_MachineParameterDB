@@ -125,3 +125,41 @@ td.detail textarea {
 .is-editing .row-actions { background: #fff4dc; }
 
 @media (prefers-reduced-motion: reduce) { .app { transition: none; } }
+
+/* Series-wide edits use a cool palette; model-only edits retain the warning amber. */
+.app.is-editing.edit-scope-series { background: #edf7fb; }
+.edit-scope-series main { background: linear-gradient(#edf7fb, #f8fcfe 28rem); }
+.edit-scope-series .editbar { background: #eaf6fb; border-color: #54a6bf; box-shadow: 0 5px 18px #17647b24; }
+.edit-scope-series .editbar > div > svg { color: #08728a; }
+.edit-scope-series .scope { border-color: #87b9c8; }
+.edit-scope-series .scope button + button { border-left-color: #87b9c8; }
+.edit-scope-series .scope button.active { background: #08788f; color: white; }
+.edit-scope-series .save { border-color: #075f73; background: #08788f; }
+.edit-scope-series .table-card { border-color: #65aebe; box-shadow: 0 0 0 2px #cce8ef, 0 2px 8px #22314b0a; }
+.edit-scope-series .table-head { background: #f1f9fc; }
+.edit-scope-series tbody tr { background: #fbfeff; }
+.edit-scope-series tbody tr:nth-child(even) { background: #f3fafc; }
+.edit-scope-series td input,
+.edit-scope-series td textarea { background: #f0f9fc; border-color: #72afc0; }
+.edit-scope-series td input:focus,
+.edit-scope-series td textarea:focus { outline-color: #5eb5ca66; border-color: #08788f; background: white; }
+.edit-scope-series .row-actions { background: #e9f6f9; }
+
+/* Keep the list title, filters, and column labels visible while rows scroll. */
+.table-card { overflow: visible; }
+.table-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: white;
+  border-radius: 9px 9px 0 0;
+  box-shadow: 0 1px 0 #e0e6eb;
+}
+thead th {
+  position: sticky;
+  top: 3.8125rem;
+  z-index: 5;
+  box-shadow: inset 0 -1px #d7e0e7;
+}
+.is-editing .table-head { top: 5.25rem; }
+.is-editing thead th { top: 9.0625rem; }

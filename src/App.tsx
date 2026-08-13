@@ -70,7 +70,7 @@ export function App() {
     }catch(error){setImportError(error instanceof Error?error.message:'ファイルを読み込めませんでした。')}finally{setImporting(false)}
   }
 
-  return <div className={`app ${edit?'is-editing':''}`}>
+  return <div className={`app ${edit?`is-editing edit-scope-${editScope}`:''}`}>
     <header><div className="brandmark"><Database size={22}/></div><div><h1>機械パラメータ管理</h1><p>Machine Parameter Database</p></div><div className="header-right"><span className="storage"><span/> ローカル保存</span><button className="help"><CircleHelp size={19}/></button></div></header>
     <main>
       <section className="control-card">
@@ -83,7 +83,7 @@ export function App() {
         <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong>{model.name}</strong></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button></div>
       </section>
 
-      {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':'この型式だけ'}</b><small>黄色の入力欄は変更できます</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
+      {edit&&<section className="editbar" role="status" aria-label="編集モード"><div><Pencil/><span><b>編集中：{editScope==='series'?'シリーズ共通値':'この型式だけ'}</b><small>{editScope==='series'?'青色の入力欄は全型式の共通値を変更します':'黄色の入力欄はこの型式だけ変更します'}</small></span><div className="scope"><button className={editScope==='series'?'active':''} onClick={()=>setEditScope('series')}>シリーズ共通値</button><button className={editScope==='model'?'active':''} onClick={()=>setEditScope('model')}>この型式だけ</button></div></div><div><button className="cancel" onClick={cancel}><X/>キャンセル</button><button className="save" onClick={persist}><Save/>変更を保存</button></div></section>}
 
       <section className="table-card">
         <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em>{model.name}</em></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>この型式だけ違う値 <b>{Object.values(model.overrides).filter(x=>Object.keys(x).length).length}</b></button></div></div>
