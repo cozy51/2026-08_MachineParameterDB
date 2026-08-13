@@ -29,6 +29,14 @@ export function App() {
     const override=model.overrides[p.id]??{}; const changedFields=Object.keys(override).filter(k=>override[k as keyof Override]!==p[k as keyof Parameter]);
     return {...p,...override,override,changedFields} as ResolvedParameter;
   }).filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!query||[p.number,p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[series,model,query,onlyDiff]);
+  const unitCategoryOptions=useMemo(()=>{
+    const values=new Set<string>();
+    source.forEach(item=>{
+      item.parameters.forEach(parameter=>{if(parameter.unitCategory.trim())values.add(parameter.unitCategory.trim())});
+      item.models.forEach(variant=>Object.values(variant.overrides).forEach(override=>{if(override.unitCategory?.trim())values.add(override.unitCategory.trim())}));
+    });
+    return [...values].sort((a,b)=>a.localeCompare(b,'ja'));
+  },[source]);
 
   const beginEdit=()=>{setDraft(structuredClone(data));setEdit(true)};
   const cancel=()=>{setDraft(null);setEdit(false);setToast('変更を破棄しました')};
@@ -72,9 +80,9 @@ export function App() {
 
       <section className="table-card">
         <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em>{model.name}</em></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>この型式だけ違う値 <b>{Object.values(model.overrides).filter(x=>Object.keys(x).length).length}</b></button></div></div>
-        <div className="table-scroll"><table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
+        <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
           const changed=row.changedFields.includes(c.key); const editable=edit&&!['id','number'].includes(c.key);
-          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?<input value={String(row[c.key]??'')} onChange={e=>update(row,c.key,e.target.value)}/>:<>{String(row[c.key]??'')}{changed&&<small>型式固有</small>}</>}</td>})}{edit&&<td><button className="reset" title="共通値に戻す" disabled={!row.changedFields.length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
+          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onChange={e=>update(row,c.key,e.target.value)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onChange={e=>update(row,c.key,e.target.value)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>型式固有</small>}</>}</td>})}{edit&&<td><button className="reset" title="共通値に戻す" disabled={!row.changedFields.length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
         <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
       </section>
     </main>
