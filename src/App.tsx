@@ -43,10 +43,12 @@ export function App() {
   const hasModelOverrides=Object.values(model.overrides).some(override=>Object.keys(override).length>0);
   useEffect(()=>{if(!series.models.some(m=>m.id===modelId))setModelId(series.models[0].id)},[series,modelId]);
   useEffect(()=>{if(!model.cargoTypes.some(item=>item.id===cargoTypeId))setCargoTypeId(model.cargoTypes[0].id)},[model,cargoTypeId]);
-  const rows=useMemo(()=>series.parameters.map(p=>{
+  const resolvedRows=useMemo(()=>series.parameters.map(p=>{
     const modelOverride=model.overrides[p.id]??{};const cargoOverride=cargoType.overrides[p.id]??{};const override={...modelOverride,...cargoOverride}; const changedFields=Object.keys(override).filter(k=>override[k as keyof Override]!==p[k as keyof Parameter]);
     return {...p,...override,override,changedFields,cargoChangedFields:Object.keys(cargoOverride)} as ResolvedParameter;
-  }).filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!parameterNumber||p.number===parameterNumber)&&(!unitCategoryFilter||p.unitCategory===unitCategoryFilter)&&(!query||[p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[series,model,cargoType,parameterNumber,unitCategoryFilter,query,onlyDiff]);
+  }),[series,model,cargoType]);
+  const filterUnitCategories=useMemo(()=>[...new Set(resolvedRows.map(row=>row.unitCategory.trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ja')),[resolvedRows]);
+  const rows=useMemo(()=>resolvedRows.filter(p=>(!onlyDiff||p.changedFields.length>0)&&(!parameterNumber||p.number===parameterNumber)&&(!unitCategoryFilter||p.unitCategory===unitCategoryFilter)&&(!query||[p.name,p.detail,p.note].join(' ').toLowerCase().includes(query.toLowerCase()))),[resolvedRows,parameterNumber,unitCategoryFilter,query,onlyDiff]);
   const parameterNumbers=useMemo(()=>[...new Set(series.parameters.map(parameter=>parameter.number))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true})),[series.parameters]);
   useEffect(()=>{if(parameterNumber&&!parameterNumbers.includes(parameterNumber))setParameterNumber('')},[parameterNumber,parameterNumbers]);
   const unitCategoryOptions=useMemo(()=>{
@@ -57,7 +59,7 @@ export function App() {
     });
     return [...values].sort((a,b)=>a.localeCompare(b,'ja'));
   },[source]);
-  useEffect(()=>{if(unitCategoryFilter&&!unitCategoryOptions.includes(unitCategoryFilter))setUnitCategoryFilter('')},[unitCategoryFilter,unitCategoryOptions]);
+  useEffect(()=>{if(unitCategoryFilter&&!filterUnitCategories.includes(unitCategoryFilter))setUnitCategoryFilter('')},[unitCategoryFilter,filterUnitCategories]);
 
   const beginEdit=()=>{setDraft(structuredClone(data));setEdit(true)};
   const cancel=()=>{setDraft(null);setEdit(false);setToast('変更を破棄しました')};
@@ -135,7 +137,7 @@ export function App() {
           <label>型式<div className={`select-wrap model ${hasModelOverrides?'has-model-overrides':''}`}><select value={modelId} onChange={e=>setModelId(e.target.value)}>{series.models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select><ChevronDown/></div></label>
           <label>搬送物<div className={`select-wrap cargo ${hasCargoOverrides?'has-cargo-overrides':''}`}><select value={cargoTypeId} onChange={e=>setCargoTypeId(e.target.value)}>{model.cargoTypes.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown/></div></label>
           <label>パラメータNo.<div className="select-wrap parameter-number"><select value={parameterNumber} onChange={e=>setParameterNumber(e.target.value)}><option value="">すべて</option>{parameterNumbers.map(number=><option key={number} value={number}>{number}</option>)}</select><ChevronDown/></div></label>
-          <label>単位分類<div className="select-wrap unit-category-filter"><select value={unitCategoryFilter} onChange={e=>setUnitCategoryFilter(e.target.value)}><option value="">すべて</option>{unitCategoryOptions.map(value=><option key={value} value={value}>{value}</option>)}</select><ChevronDown/></div></label>
+          <label>単位分類<div className="select-wrap unit-category-filter"><select value={unitCategoryFilter} onChange={e=>setUnitCategoryFilter(e.target.value)}><option value="">すべて</option>{filterUnitCategories.map(value=><option key={value} value={value}>{value}</option>)}</select><ChevronDown/></div></label>
           <label className="search-label">検索<div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="名称・説明・備考を検索"/>{query&&<button onClick={()=>setQuery('')}><X size={16}/></button>}</div></label>
           <div className="mode-block"><span>モード</span><button className={'mode '+(edit?'editing':'')} onClick={()=>edit?cancel():beginEdit()}><span className="toggle"><i/></span>{edit?<><Pencil/>編集モード</>:<><Check/>参照モード</>}</button></div>
         </div>
@@ -147,7 +149,7 @@ export function App() {
 
       <section className="table-card">
         <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em className={hasModelOverrides?'has-model-overrides':''}>{model.name}</em><em className={`cargo-badge ${hasCargoOverrides?'has-cargo-overrides':''}`}>{cargoType.name}</em><button className="excel-export" disabled={!rows.length} onClick={exportParameterExcel}><Sheet/>Excel出力</button></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>型式・搬送物の差分 <b>{new Set([...Object.keys(model.overrides),...Object.keys(cargoType.overrides)]).size}</b></button></div></div>
-        <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.key==='unitCategory'?<label className="column-filter"><span>単位分類</span><select aria-label="単位分類で絞り込み" value={unitCategoryFilter} onChange={e=>setUnitCategoryFilter(e.target.value)}><option value="">すべて</option>{unitCategoryOptions.map(value=><option key={value} value={value}>{value}</option>)}</select></label>:c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
+        <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
           const changed=row.changedFields.includes(c.key); const editable=edit&&!['id','number'].includes(c.key);
           return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''} ${row.cargoChangedFields.includes(c.key)?'cargo-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onInput={handleFieldInput(row,c.key)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onInput={handleFieldInput(row,c.key)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>{row.cargoChangedFields.includes(c.key)?'搬送物固有':'型式固有'}</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={editScope==='cargo'?!row.cargoChangedFields.length:!Object.keys(model.overrides[row.id]??{}).length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
         <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
