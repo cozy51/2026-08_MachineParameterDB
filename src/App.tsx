@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Trash2, UploadCloud, X } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { AlertTriangle, Check, ChevronDown, CircleHelp, CloudCog, Database, Download, FileSpreadsheet, Filter, Import, Layers3, Pencil, RotateCcw, Save, Search, Trash2, Upload, UploadCloud, X } from 'lucide-react';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import { seedData } from './data';
 import { ensureEnvelope, loadData, saveData, writeEnvelope } from './storage';
-import { clearCloudSettings, compareBackups, currentUser, downloadBackup, loadCloudSettings, safeUpload, saveCloudSettings, signIn, signOut, supabase, type CloudBackup, type SyncState } from './backup';
+import { clearCloudSettings, compareBackups, currentUser, downloadBackup, loadCloudSettings, safeUpload, saveCloudSettings, signIn, signOut, supabase, validateBackup, type CloudBackup, type SyncState } from './backup';
 import { applyImport, recordsToParameters } from './importer';
 import type { BackupEnvelope, Override, Parameter, ResolvedParameter, Series } from './types';
 
@@ -19,6 +19,7 @@ export function App() {
   const [onlyDiff,setOnlyDiff]=useState(false); const [draft,setDraft]=useState<Series[]|null>(null);
   const [editScope,setEditScope]=useState<'model'|'series'>('model'); const [importOpen,setImportOpen]=useState(false);
   const [toast,setToast]=useState(''); const fileRef=useRef<HTMLInputElement>(null);
+  const localImportRef=useRef<HTMLInputElement>(null);
   const [importScope,setImportScope]=useState<'series'|'model'>('series');
   const [importing,setImporting]=useState(false); const [importError,setImportError]=useState('');
   const [deleteTarget,setDeleteTarget]=useState<ResolvedParameter|null>(null);
@@ -63,6 +64,7 @@ export function App() {
     else {const m=s.models.find(x=>x.id===modelId)!;m.overrides[row.id]??={};(m.overrides[row.id] as Record<string,string>)[key]=value}
     return next;
   });
+  const handleFieldInput=(row:ResolvedParameter,key:keyof Parameter)=>(event:FormEvent<HTMLInputElement|HTMLTextAreaElement>)=>update(row,key,event.currentTarget.value);
   const resetOverride=(id:string)=>setDraft(current=>{if(!current)return current;const next=structuredClone(current);const m=next.find(s=>s.id===seriesId)!.models.find(x=>x.id===modelId)!;delete m.overrides[id];return next});
   const deleteRow=()=>{
     if(!deleteTarget)return;
@@ -83,6 +85,22 @@ export function App() {
       const notes=[`${converted.parameters.length}件を登録しました`];if(converted.skippedRows)notes.push(`空行${converted.skippedRows}件を除外`);if(converted.unknownColumns.length)notes.push(`追加列${converted.unknownColumns.length}件も保持`);
       setToast(`${file.name}：${notes.join('・')}`);
     }catch(error){setImportError(error instanceof Error?error.message:'ファイルを読み込めませんでした。')}finally{setImporting(false)}
+  }
+
+  function exportLocalBackup(){
+    if(!envelope)return;
+    const blob=new Blob([JSON.stringify(envelope,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const link=document.createElement('a');
+    link.href=url;link.download=`MachineParameterDB-${new Date().toISOString().slice(0,10)}-v${envelope.dataVersion}.json`;document.body.appendChild(link);link.click();link.remove();URL.revokeObjectURL(url);setToast('ローカルバックアップを書き出しました');
+  }
+  async function importLocalBackup(file:File){
+    setCloudError('');
+    try{
+      const imported=validateBackup(JSON.parse(await file.text()));
+      if(!window.confirm(`ローカルデータをバックアップ（世代 ${imported.dataVersion}）で置き換えますか？\n現在のデータは、復元に失敗した場合に元へ戻されます。`))return;
+      const previous=envelope;
+      try{await writeEnvelope(imported);setData(imported.data.series);setEnvelope(imported);setDraft(null);setEdit(false);setParameterNumber('');setSyncState(userId?'local-newer':supabase?'local':'disabled');setToast('ローカルバックアップを取り込みました')}
+      catch(error){if(previous)await writeEnvelope(previous);throw error}
+    }catch(error){setToast(`インポート失敗：${error instanceof Error?error.message:'JSONを確認してください'}`)}
   }
 
   async function checkCloud(){if(!userId||!envelope)return;setSyncState('checking');setCloudError('');try{const cloud=await downloadBackup(userId);setCloudBackup(cloud);if(!cloud){setSyncState('local-newer');return}const relation=await compareBackups(envelope,cloud.envelope);setSyncState(relation==='same'?'synced':relation);if(relation==='same')setLastSync(cloud.serverUpdatedAt??cloud.envelope.updatedAt)}catch(error){setSyncState('error');setCloudError(error instanceof Error?error.message:'クラウド確認に失敗しました')}}
@@ -107,7 +125,7 @@ export function App() {
           <label className="search-label">検索<div className="search"><Search size={18}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="名称・説明・備考を検索"/>{query&&<button onClick={()=>setQuery('')}><X size={16}/></button>}</div></label>
           <div className="mode-block"><span>モード</span><button className={'mode '+(edit?'editing':'')} onClick={()=>edit?cancel():beginEdit()}><span className="toggle"><i/></span>{edit?<><Pencil/>編集モード</>:<><Check/>参照モード</>}</button></div>
         </div>
-        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong className={hasModelOverrides?'has-model-overrides':''}>{model.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button></div>
+        <div className="context"><div><b>{series.name}</b><span>{series.description}</span><i>›</i><strong className={hasModelOverrides?'has-model-overrides':''}>{model.name}</strong></div><div className="cloud-actions"><button disabled={!userId||syncState==='uploading'} onClick={()=>uploadCloud()}><UploadCloud size={17}/>クラウドへバックアップ</button><button disabled={!userId} onClick={restoreCloud}>↓ クラウドから更新</button>{(syncState==='conflict'||syncState==='cloud-newer')&&<button className="force-cloud" onClick={()=>window.confirm('クラウドの新しいデータを上書きします。通常は推奨されません。続行しますか？')&&uploadCloud(true)}>強制上書き</button>}</div><div className="local-actions"><button onClick={()=>localImportRef.current?.click()}><Upload size={17}/>ローカルへインポート</button><button disabled={!envelope} onClick={exportLocalBackup}><Download size={17}/>ローカルへエクスポート</button></div><button onClick={()=>setImportOpen(true)}><Import size={17}/> Excel / CSV インポート</button><input ref={localImportRef} hidden type="file" accept="application/json,.json" onChange={event=>{const file=event.target.files?.[0];if(file)importLocalBackup(file);event.target.value=''}}/></div>
         {(syncState==='cloud-newer'||syncState==='conflict'||syncState==='error')&&<div className={`cloud-alert ${syncState}`}><AlertTriangle/>{syncState==='cloud-newer'?'別のPCで、より新しいデータが保存されています':syncState==='conflict'?'ローカルとクラウドの変更が競合しています。自動バックアップを停止しました':cloudError}</div>}
       </section>
 
@@ -117,7 +135,7 @@ export function App() {
         <div className="table-head"><div><h2>パラメータ一覧</h2><span>{rows.length} 件</span><em className={hasModelOverrides?'has-model-overrides':''}>{model.name}</em></div><div className="legend"><span><i className="common"/>共通値</span><span><i className="specific"/>型式固有値</span><button className={onlyDiff?'active':''} onClick={()=>setOnlyDiff(v=>!v)}><Filter/>この型式だけ違う値 <b>{Object.values(model.overrides).filter(x=>Object.keys(x).length).length}</b></button></div></div>
         <div className="table-scroll">{edit&&<datalist id="unit-category-options">{unitCategoryOptions.map(value=><option key={value} value={value}/>)}</datalist>}<table><thead><tr>{columns.map(c=><th key={c.key}>{c.label}</th>)}{edit&&<th/>}</tr></thead><tbody>{rows.map(row=><tr key={row.id} className={row.changedFields.length?'changed':''}>{columns.map(c=>{
           const changed=row.changedFields.includes(c.key); const editable=edit&&!['id','number'].includes(c.key);
-          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onChange={e=>update(row,c.key,e.target.value)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onChange={e=>update(row,c.key,e.target.value)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>型式固有</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={!row.changedFields.length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
+          return <td key={c.key} className={`${c.key} ${changed?'cell-changed':''}`}>{c.key==='number'&&<span className="origin-dot"/>}{editable?(c.key==='detail'?<textarea value={row.detail} rows={5} placeholder="設定値の詳細を入力（Enterで改行）" onInput={handleFieldInput(row,c.key)}/>:<input value={String(row[c.key]??'')} list={c.key==='unitCategory'?'unit-category-options':undefined} placeholder={c.key==='unitCategory'?'選択または新規入力':undefined} title={c.key==='unitCategory'?'過去の入力から選択、または新しい分類を入力できます':undefined} onInput={handleFieldInput(row,c.key)}/>):<><span className={c.key==='detail'?'multiline-value':undefined}>{String(row[c.key]??'')}</span>{changed&&<small>型式固有</small>}</>}</td>})}{edit&&<td className="row-actions"><button className="reset" title="共通値に戻す" disabled={!row.changedFields.length} onClick={()=>resetOverride(row.id)}><RotateCcw/></button><button className="delete-row" title="この行を削除" aria-label={`パラメータNo. ${row.number}を削除`} onClick={()=>setDeleteTarget(row)}><Trash2/></button></td>}</tr>)}</tbody></table>{!rows.length&&<div className="empty">条件に一致するパラメータはありません</div>}</div>
         <footer><span>表示中：{rows.length} / {series.parameters.length} 件</span><span><i/> データはこのブラウザの IndexedDB に保存されます</span></footer>
       </section>
     </main>
