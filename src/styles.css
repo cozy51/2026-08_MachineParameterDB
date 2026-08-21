@@ -88,6 +88,7 @@ td.detail textarea {
 }
 .cell-changed textarea { border-color: #e4ac56; }
 .multiline-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+mark.search-hit { background: #ffe066; color: inherit; border-radius: 2px; padding: 0 1px; }
 
 .row-actions { width: 5.5rem; white-space: nowrap; }
 .row-actions button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 4px; }
