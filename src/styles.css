@@ -88,7 +88,7 @@ td.detail textarea {
 }
 .cell-changed textarea { border-color: #e4ac56; }
 .multiline-value { white-space: pre-wrap; overflow-wrap: anywhere; }
-mark.search-hit { background: #ff2d95; color: #fff; font-weight: 700; border-radius: 3px; padding: 1px 3px; box-shadow: 0 0 0 1px #d4006e33; }
+mark.search-hit { background: #ffa8d6; color: inherit; font-weight: 700; border-radius: 3px; padding: 1px 3px; box-shadow: 0 0 0 1px #e2569933; }
 
 .row-actions { width: 5.5rem; white-space: nowrap; }
 .row-actions button { display: inline-grid; place-items: center; width: 2rem; height: 2rem; border-radius: 4px; }
