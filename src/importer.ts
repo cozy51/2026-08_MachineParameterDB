@@ -28,22 +28,22 @@ export function recordsToParameters(records:Record<string,unknown>[]):ImportResu
   return {parameters,skippedRows,unknownColumns:[...unknown]};
 }
 
-export function applyImport(series:Series,modelId:string,incoming:Parameter[],scope:'series'|'model') {
+export type ApplyImportResult={series:Series;added:number;skippedExisting:number};
+
+/** Existing パラメータNo are left untouched — import only adds numbers not already present. */
+export function applyImport(series:Series,modelId:string,incoming:Parameter[],scope:'series'|'model'):ApplyImportResult {
   const next=structuredClone(series); const model=next.models.find(item=>item.id===modelId);
   if(!model)throw new Error('対象型式が見つかりません。');
+  let added=0,skippedExisting=0;
   incoming.forEach(item=>{
-    let base=next.parameters.find(parameter=>parameter.number===item.number);
-    if(!base){
-      base=scope==='series'?{...item,id:crypto.randomUUID()}:{id:crypto.randomUUID(),number:item.number,standardValue:'',unit:'',name:'',detail:'',unitCategory:'',note:''};
-      next.parameters.push(base);
-      if(scope==='model')model.overrides[base.id]=toOverride(item,base);
-      return;
-    }
-    if(scope==='series'){const id=base.id;Object.assign(base,item,{id})}
-    else {const override=toOverride(item,base);if(Object.keys(override).length)model.overrides[base.id]=override;else delete model.overrides[base.id]}
+    if(next.parameters.some(parameter=>parameter.number===item.number)){skippedExisting++;return}
+    const base=scope==='series'?{...item,id:crypto.randomUUID()}:{id:crypto.randomUUID(),number:item.number,standardValue:'',unit:'',name:'',detail:'',unitCategory:'',note:''};
+    next.parameters.push(base);
+    if(scope==='model')model.overrides[base.id]=toOverride(item,base);
+    added++;
   });
   next.parameters.sort((a,b)=>a.number.localeCompare(b.number,undefined,{numeric:true}));
-  return next;
+  return {series:next,added,skippedExisting};
 }
 
 function toOverride(item:Parameter,base:Parameter):Override {
