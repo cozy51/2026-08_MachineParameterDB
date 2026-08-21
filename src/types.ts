@@ -1,6 +1,8 @@
 export type Parameter = {
   id: string; number: string; standardValue: string; unit: string; name: string;
-  detail: string; unitCategory: string; note: string; extra?: Record<string, unknown>;
+  detail: string; unitCategory: string; note: string;
+  min?: string; max?: string; display?: string;
+  extra?: Record<string, unknown>;
 };
 export type Override = Partial<Omit<Parameter, 'id' | 'number'>>;
 export type CargoType = { id: string; name: string; overrides: Record<string, Override> };

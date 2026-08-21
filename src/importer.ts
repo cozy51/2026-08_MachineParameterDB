@@ -5,8 +5,9 @@ const aliases: Record<string, keyof Parameter> = {
   '標準的な値': 'standardValue', '標準値': 'standardValue', '単位': 'unit',
   'パラメータ名称': 'name', 'パラメータ名': 'name', '設定値詳細': 'detail',
   '単位分類': 'unitCategory', '備考': 'note',
+  '最小': 'min', '最大': 'max', '表示内容': 'display',
 };
-const editableKeys: (keyof Omit<Parameter, 'id' | 'number'>)[] = ['standardValue','unit','name','detail','unitCategory','note','extra'];
+const editableKeys: (keyof Omit<Parameter, 'id' | 'number'>)[] = ['standardValue','unit','name','detail','unitCategory','note','min','max','display','extra'];
 const normalizeHeader=(value:unknown)=>String(value??'').replace(/^\uFEFF/,'').replace(/[\s　_]+/g,'').toLowerCase();
 const cell=(value:unknown)=>value===null||value===undefined?'':String(value).replace(/\r\n/g,'\n').trim();
 
@@ -23,7 +24,7 @@ export function recordsToParameters(records:Record<string,unknown>[]):ImportResu
       else if(heading&&raw!==''&&raw!==null&&raw!==undefined){extra[heading]=raw;unknown.add(heading)}
     });
     const number=cell(values.number); if(!number){skippedRows++;return}
-    parameters.push({id:`import-${number}-${index}`,number,standardValue:cell(values.standardValue),unit:cell(values.unit),name:cell(values.name),detail:cell(values.detail),unitCategory:cell(values.unitCategory),note:cell(values.note),...(Object.keys(extra).length?{extra}:{})});
+    parameters.push({id:`import-${number}-${index}`,number,standardValue:cell(values.standardValue),unit:cell(values.unit),name:cell(values.name),detail:cell(values.detail),unitCategory:cell(values.unitCategory),note:cell(values.note),min:cell(values.min),max:cell(values.max),display:cell(values.display),...(Object.keys(extra).length?{extra}:{})});
   });
   return {parameters,skippedRows,unknownColumns:[...unknown]};
 }
@@ -37,7 +38,7 @@ export function applyImport(series:Series,modelId:string,incoming:Parameter[],sc
   let added=0,skippedExisting=0;
   incoming.forEach(item=>{
     if(next.parameters.some(parameter=>parameter.number===item.number)){skippedExisting++;return}
-    const base=scope==='series'?{...item,id:crypto.randomUUID()}:{id:crypto.randomUUID(),number:item.number,standardValue:'',unit:'',name:'',detail:'',unitCategory:'',note:''};
+    const base=scope==='series'?{...item,id:crypto.randomUUID()}:{id:crypto.randomUUID(),number:item.number,standardValue:'',unit:'',name:'',detail:'',unitCategory:'',note:'',min:'',max:'',display:''};
     next.parameters.push(base);
     if(scope==='model')model.overrides[base.id]=toOverride(item,base);
     added++;
